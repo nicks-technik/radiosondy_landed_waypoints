@@ -5,12 +5,14 @@ This project provides a Python script to extract the last seen and predicted lan
 ## Features
 
 *   Fetches radiosonde data from `radiosondy.info`.
-*   Parses the last seen and predicted landing coordinates.
+*   Parses the last seen and predicted landing coordinates, including course and altitude.
 *   Generates a GPX file with waypoints for both coordinates.
 *   The GPX file is named with the sonde number and the last seen time (e.g., `403823_240912_1200_gpx_waypoint.gpx`).
 *   Automatically sends the generated GPX file to a Telegram chat.
 
 ## Usage
+
+**Important Note:** This script relies on the HTML structure of the `radiosondy.info` website. If the website's structure changes, the script may break.
 
 1.  **Install Dependencies:**
 
@@ -37,7 +39,7 @@ This project provides a Python script to extract the last seen and predicted lan
     For example:
 
     ```bash
-    uv run python main.py http://www.radiosondy.info/sonde.php?t=2024091212_403823
+    uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792
     ```
 
     The script will generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).

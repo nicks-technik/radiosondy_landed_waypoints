@@ -37,14 +37,17 @@ def parse_coordinates(html_content):
 
     Returns:
         tuple: A tuple containing the last seen coordinates (lat, lon),
-               the predicted landing point coordinates (lat, lon), and the
-               last seen time (datetime object). Returns (None, None, None)
+               the predicted landing point coordinates (lat, lon),
+               the last seen time (datetime object), the course (str),
+               and the altitude (str). Returns (None, None, None, None, None)
                if parsing fails.
     """
     soup = BeautifulSoup(html_content, "html.parser")
     last_seen = None
     landing_point = None
     last_seen_time = None
+    course = None
+    altitude = None
 
     # Find last seen coordinates and time
     try:
@@ -54,6 +57,8 @@ def parse_coordinates(html_content):
         last_seen_time_str = cells[2].text
         lat_str = cells[3].text
         lon_str = cells[4].text
+        course = cells[5].text  # Assuming Kurs is in the 6th column (index 5)
+        altitude = cells[6].text  # Assuming Höhe is in the 7th column (index 6)
         last_seen = (float(lat_str), float(lon_str))
         last_seen_time = datetime.strptime(last_seen_time_str, "%Y-%m-%d %H:%M:%S")
     except (AttributeError, IndexError, ValueError) as e:
@@ -78,15 +83,16 @@ def parse_coordinates(html_content):
                     )
                     if coords_tag is not None:
                         coords_str = coords_tag.text.strip()
-                        lon, lat, _ = map(float, coords_str.split(','))
+                        lon, lat, _ = map(float, coords_str.split(","))
                         landing_point = (lat, lon)
     except Exception as e:
         print(f"Could not parse predicted landing coordinates: {e}")
 
-    return last_seen, landing_point, last_seen_time
+    return last_seen, landing_point, last_seen_time, course, altitude
 
-
-def create_gpx_file(last_seen, landing_point, sonde_number, last_seen_time):
+def create_gpx_file(
+    last_seen, landing_point, sonde_number, last_seen_time, course, altitude
+):
     """Creates a GPX file with waypoints for the last seen and landing point.
 
     Args:
@@ -94,6 +100,8 @@ def create_gpx_file(last_seen, landing_point, sonde_number, last_seen_time):
         landing_point (tuple): A tuple containing the latitude and longitude of the predicted landing position.
         sonde_number (str): The radiosonde identification number.
         last_seen_time (datetime): The timestamp of the last seen position.
+        course (str): The course of the radiosonde at the last seen position.
+        altitude (str): The altitude of the radiosonde at the last seen position.
 
     Returns:
         str: The filename of the created GPX file, or None if an error occurred.
@@ -105,6 +113,7 @@ def create_gpx_file(last_seen, landing_point, sonde_number, last_seen_time):
     last_seen_waypoint.latitude = last_seen[0]
     last_seen_waypoint.longitude = last_seen[1]
     last_seen_waypoint.name = "Last Seen"
+    last_seen_waypoint.description = f"Course: {course}, Altitude: {altitude}"
     gpx.waypoints.append(last_seen_waypoint)
 
     # Create landing point waypoint
@@ -124,6 +133,7 @@ def create_gpx_file(last_seen, landing_point, sonde_number, last_seen_time):
     except IOError as e:
         print(f"Error writing GPX file: {e}")
         return None
+
 
 
 async def send_to_telegram(file_path):
@@ -167,13 +177,13 @@ def main():
 
     html_content = fetch_website_content(args.url)
     if html_content:
-        last_seen, landing_point, last_seen_time = parse_coordinates(html_content)
-        if last_seen and landing_point and last_seen_time:
+        last_seen, landing_point, last_seen_time, course, altitude = parse_coordinates(html_content)
+        if last_seen and landing_point and last_seen_time and course and altitude:
             match = re.search(r"sondenumber=([A-Z0-9]+)", args.url)
             if match:
                 sonde_number = match.group(1)
                 filename = create_gpx_file(
-                    last_seen, landing_point, sonde_number, last_seen_time
+                    last_seen, landing_point, sonde_number, last_seen_time, course, altitude
                 )
                 if filename:
                     import asyncio
