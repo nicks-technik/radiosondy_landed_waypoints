@@ -1,14 +1,15 @@
-import os
-from dotenv import load_dotenv
-import telegram
 import argparse
-import requests
-from bs4 import BeautifulSoup
+import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
+
 import gpxpy
 import gpxpy.gpx
+import requests
+import telegram
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 
 def fetch_website_content(url):
@@ -37,10 +38,10 @@ def parse_coordinates(html_content):
 
     Returns:
         tuple: A tuple containing the last seen coordinates (lat, lon),
-               the predicted landing point coordinates (lat, lon),
-               the last seen time (datetime object), the course (str),
-               and the altitude (str). Returns (None, None, None, None, None)
-               if parsing fails.
+            the predicted landing point coordinates (lat, lon),
+            the last seen time (datetime object), the course (str),
+            and the altitude (str). Returns (None, None, None, None, None)
+            if parsing fails.
     """
     soup = BeautifulSoup(html_content, "html.parser")
     last_seen = None
