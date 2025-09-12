@@ -58,7 +58,7 @@ def parse_coordinates(html_content):
         lat_str = cells[3].text
         lon_str = cells[4].text
         course = cells[5].text  # Assuming Kurs is in the 6th column (index 5)
-        altitude = cells[6].text  # Assuming Höhe is in the 7th column (index 6)
+        altitude = cells[7].text  # Assuming Höhe is in the 7th column (index 7)
         last_seen = (float(lat_str), float(lon_str))
         last_seen_time = datetime.strptime(last_seen_time_str, "%Y-%m-%d %H:%M:%S")
     except (AttributeError, IndexError, ValueError) as e:
@@ -89,6 +89,7 @@ def parse_coordinates(html_content):
         print(f"Could not parse predicted landing coordinates: {e}")
 
     return last_seen, landing_point, last_seen_time, course, altitude
+
 
 def create_gpx_file(
     last_seen, landing_point, sonde_number, last_seen_time, course, altitude
@@ -135,7 +136,6 @@ def create_gpx_file(
         return None
 
 
-
 async def send_to_telegram(file_path):
     """Sends the GPX file to a Telegram chat.
 
@@ -177,13 +177,20 @@ def main():
 
     html_content = fetch_website_content(args.url)
     if html_content:
-        last_seen, landing_point, last_seen_time, course, altitude = parse_coordinates(html_content)
+        last_seen, landing_point, last_seen_time, course, altitude = parse_coordinates(
+            html_content
+        )
         if last_seen and landing_point and last_seen_time and course and altitude:
             match = re.search(r"sondenumber=([A-Z0-9]+)", args.url)
             if match:
                 sonde_number = match.group(1)
                 filename = create_gpx_file(
-                    last_seen, landing_point, sonde_number, last_seen_time, course, altitude
+                    last_seen,
+                    landing_point,
+                    sonde_number,
+                    last_seen_time,
+                    course,
+                    altitude,
                 )
                 if filename:
                     import asyncio
