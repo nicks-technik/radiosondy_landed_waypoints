@@ -1,0 +1,36 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ main, develop, more_features ]
+  pull_request:
+    branches: [ main, develop, more_features ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' # Match the project's requires-python version
+
+    - name: Install uv
+      run: pip install uv
+
+    - name: Generate requirements.txt
+      run: uv pip compile pyproject.toml -o requirements.txt
+
+    - name: Install dependencies
+      run: uv pip install -r requirements.txt
+
+    - name: Install dev dependencies (ruff, pytest, pytest-asyncio)
+      run: uv pip install ruff pytest pytest-asyncio
+
+    - name: Run ruff linter
+      run: uv run ruff check .
+
+    - name: Run tests
+      run: PYTHONPATH=$PWD uv run pytest tests/

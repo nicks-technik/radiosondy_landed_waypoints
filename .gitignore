@@ -126,5 +126,8 @@ cython_debug/
 # uv
 .uv_cache
 
+# Generated files
+requirements.txt
+
 /gpx/
 session_name.session
