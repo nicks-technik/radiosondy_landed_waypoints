@@ -1,7 +1,5 @@
 import argparse
-import asyncio
 import os
-import re
 import requests
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
