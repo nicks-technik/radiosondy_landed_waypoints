@@ -209,6 +209,8 @@ def create_gpx_file(
     speed,
     ground_height,
     time_to_ground,
+    radiosondy_coords=None,
+    radiosondy_coords_description=None,
 ):
     """Creates a GPX file with waypoints for the last seen and landing point.
 
@@ -219,6 +221,10 @@ def create_gpx_file(
         last_seen_time (datetime): The timestamp of the last seen position.
         course (str): The course of the radiosonde at the last seen position.
         altitude (str): The altitude of the radiosonde at the last seen position.
+        speed (float): The speed of the radiosonde at the last seen position.
+        ground_height (float): The ground height at the landing position.
+        time_to_ground (float): The time to ground in seconds.
+        radiosondy_coords (tuple, optional): A tuple containing the latitude and longitude of a manual landing point. Defaults to None.
 
     Returns:
         str: The filename of the created GPX file, or None if an error occurred.
@@ -245,6 +251,17 @@ def create_gpx_file(
     landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}, LandingTime: {time_str}"
     landing_point_waypoint.symbol = "z-ico01"
     gpx.waypoints.append(landing_point_waypoint)
+
+    # Create manual landing point waypoint if coords are provided
+    if radiosondy_coords:
+        radiosondy_waypoint = gpxpy.gpx.GPXWaypoint()
+        radiosondy_waypoint.latitude = radiosondy_coords[0]
+        radiosondy_waypoint.longitude = radiosondy_coords[1]
+        radiosondy_waypoint.name = f"{sonde_number} radiosondy Landing Point"
+        if radiosondy_coords_description:
+            radiosondy_waypoint.description = radiosondy_coords_description
+        radiosondy_waypoint.symbol = "z-ico02"
+        gpx.waypoints.append(radiosondy_waypoint)
 
     try:
         filename = f"gpx/{sonde_number}_{time_str}_gpx_waypoint.gpx"
@@ -293,6 +310,10 @@ def main():
         description="Generate a GPX waypoint file from a radiosonde tracking website."
     )
     parser.add_argument("url", help="The URL of the radiosonde tracking website.")
+    parser.add_argument(
+        "--coords",
+        help="Optional coordinates in format 'lat,lon' to add as a waypoint.",
+    )
     args = parser.parse_args()
 
     html_content = fetch_website_content(args.url)
@@ -317,6 +338,33 @@ def main():
             match = re.search(r"sondenumber=([A-Z0-9]+)", args.url)
             if match:
                 sonde_number = match.group(1)
+
+                radiosondy_coords = None
+                radiosondy_coords_description = None
+                if args.coords:
+                    try:
+                        # Match 'lat,lon' or 'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'
+                        coords_match = re.match(
+                            r"([\d.\-]+),([\d.\-]+)(\s+at\s+(.*))?", args.coords
+                        )
+                        if coords_match:
+                            lat_str = coords_match.group(1)
+                            lon_str = coords_match.group(2)
+                            radiosondy_coords = (float(lat_str), float(lon_str))
+                            if coords_match.group(4):
+                                radiosondy_coords_description = coords_match.group(4)
+                        else:
+                            print(
+                                "Invalid format for --coords. Please use 'lat,lon' or 'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'."
+                            )
+
+                        print(f"radiosondy_coords: {radiosondy_coords}")
+
+                    except ValueError:
+                        print(
+                            "Invalid format for --coords. Please use 'lat,lon' or 'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'."
+                        )
+
                 filename = create_gpx_file(
                     last_seen,
                     landing_point,
@@ -327,6 +375,8 @@ def main():
                     speed,
                     ground_height,
                     time_to_ground,
+                    radiosondy_coords,
+                    radiosondy_coords_description,
                 )
                 if filename:
                     import asyncio

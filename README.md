@@ -44,6 +44,17 @@ This project provides a Python script to extract the last seen and predicted lan
 
     The script will generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).
 
+    You can also provide manual coordinates for a landing point using the `--coords` flag. The coordinates can be in one of two formats:
+    *   `'lat,lon'` (e.g., `'50.22794,9.40322'`)
+    *   `'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'` (e.g., `'50.22794,9.40322 at 2025-09-12T13:05:49.25Z'`)
+
+    When the second format is used, the date and time will be added as a description to the waypoint.
+
+    Example with manual coordinates:
+    ```bash
+    uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792 --coords '50.22794,9.40322 at 2025-09-12T13:05:49.25Z'
+    ```
+
 ## Telegram Integration
 
 This script can automatically send the generated GPX file to a Telegram chat. To enable this feature, you need to provide your Telegram bot token and chat ID.
