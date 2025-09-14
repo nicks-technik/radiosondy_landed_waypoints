@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime
 
 import gpxpy
@@ -10,6 +11,26 @@ import requests
 import telegram
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+
+# Constants
+EARTH_RADIUS_KM = 6371.0
+GPX_SYMBOL_LAST_SEEN = "transport-airport"
+GPX_SYMBOL_PREDICTED_LANDING = "z-ico01"
+GPX_SYMBOL_RADIOSONDY_LANDING = "z-ico02"
+APRS_DATA_TABLE_ID = "Table7"
+
+
+@dataclass
+class SondeData:
+    """Holds the parsed data for a radiosonde."""
+
+    lat: float
+    lon: float
+    last_seen_time: datetime
+    course: float
+    altitude: float
+    speed_mps: float
+    climb_rate: float
 
 
 def fetch_website_content(url):
@@ -59,8 +80,6 @@ def calculate_landing_point(
     print(f"  - Course: {course} degrees")
     print(f"  - Descent Rate: {descent_rate} m/s")
 
-    global time_to_ground
-
     time_to_ground = height_to_descend / descent_rate
     print(f"  - Time to Ground: {time_to_ground} s")
 
@@ -72,7 +91,7 @@ def calculate_landing_point(
     course_rad = math.radians(course)
 
     # Earth radius in km
-    earth_radius_km = 6371.0
+    earth_radius_km = EARTH_RADIUS_KM
 
     new_lat_rad = math.asin(
         math.sin(lat_rad) * math.cos(distance_km / earth_radius_km)
@@ -91,23 +110,20 @@ def calculate_landing_point(
     new_lat = math.degrees(new_lat_rad)
     new_lon = math.degrees(new_lon_rad)
 
-    return new_lat, new_lon
+    return new_lat, new_lon, time_to_ground
 
 
-def parse_last_seen_data(soup):
+def parse_last_seen_data(soup) -> SondeData | None:
     """Parses the HTML to find the last seen coordinates, time, course, altitude and speed.
 
     Args:
         soup (BeautifulSoup): The BeautifulSoup object of the HTML content.
 
     Returns:
-        tuple: A tuple containing the last seen coordinates (lat, lon),
-            the last seen time (datetime object), the course (str),
-            the altitude (str) and the speed (str). Returns (None, None, None, None, None)
-            if parsing fails.
+        SondeData: An object containing the parsed data, or None if parsing fails.
     """
     try:
-        aprs_data_table = soup.find("table", id="Table7")
+        aprs_data_table = soup.find("table", id=APRS_DATA_TABLE_ID)
         first_row = aprs_data_table.find("tbody").find("tr")
         cells = first_row.find_all("td")
         last_seen_time_str = cells[2].text
@@ -125,20 +141,20 @@ def parse_last_seen_data(soup):
         # Convert speed from km/h to m/s
         speed_mps = float(speed_kmh) * 1000 / 3600
 
-        last_seen = (float(lat_str), float(lon_str))
         last_seen_time = datetime.strptime(last_seen_time_str, "%Y-%m-%d %H:%M:%S")
-        print(f"last_seen: {last_seen}")
-        return (
-            last_seen,
-            last_seen_time,
-            float(course),
-            float(altitude),
-            speed_mps,
-            climb_rate,
+        print(f"last_seen: ({float(lat_str)}, {float(lon_str)})")
+        return SondeData(
+            lat=float(lat_str),
+            lon=float(lon_str),
+            last_seen_time=last_seen_time,
+            course=float(course),
+            altitude=float(altitude),
+            speed_mps=speed_mps,
+            climb_rate=climb_rate,
         )
     except (AttributeError, IndexError, ValueError) as e:
         print(f"Could not parse last seen data: {e}")
-        return None, None, None, None, None, None
+        return None
 
 
 def get_coordinates(html_content):
@@ -151,77 +167,53 @@ def get_coordinates(html_content):
     soup = BeautifulSoup(html_content, "html.parser")
     landing_point = None
     ground_height = 0.0
+    time_to_ground = 0
 
     # Find ground height
     try:
         ground_altitude_match = re.search(r"Ground Altitude: (\d+) m", html_content)
         if ground_altitude_match:
             ground_height = float(ground_altitude_match.group(1))
-    except Exception as e:
+    except (AttributeError, IndexError, ValueError) as e:
         print(f"Could not parse ground height: {e}")
 
-    # Use the new helper function to parse last seen data
-    last_seen, last_seen_time, course, altitude, speed, climb_rate = (
-        parse_last_seen_data(soup)
-    )
+    sonde_data = parse_last_seen_data(soup)
 
-    if (
-        last_seen
-        and course is not None
-        and altitude is not None
-        and speed is not None
-        and climb_rate is not None
-    ):
+    if sonde_data:
         # Use the absolute value of the climb rate as the descent rate
-        descent_rate = abs(climb_rate)
+        descent_rate = abs(sonde_data.climb_rate)
         if descent_rate > 0:
-            landing_point = calculate_landing_point(
-                last_seen[0],
-                last_seen[1],
-                altitude,
-                speed,
-                course,
+            lat, lon, time_to_ground = calculate_landing_point(
+                sonde_data.lat,
+                sonde_data.lon,
+                sonde_data.altitude,
+                sonde_data.speed_mps,
+                sonde_data.course,
                 descent_rate,
                 ground_height,
             )
+            landing_point = (lat, lon)
 
     print(f"landing_point: {landing_point}")
 
-    return (
-        last_seen,
-        landing_point,
-        last_seen_time,
-        course,
-        altitude,
-        speed,
-        ground_height,
-        time_to_ground,
-    )
+    return sonde_data, landing_point, ground_height, time_to_ground
 
 
 def create_gpx_file(
-    last_seen,
-    landing_point,
-    sonde_number,
-    last_seen_time,
-    course,
-    altitude,
-    speed,
-    ground_height,
-    time_to_ground,
+    sonde_data: SondeData,
+    landing_point: tuple,
+    sonde_number: str,
+    ground_height: float,
+    time_to_ground: float,
     radiosondy_coords=None,
     radiosondy_coords_description=None,
 ):
     """Creates a GPX file with waypoints for the last seen and landing point.
 
     Args:
-        last_seen (tuple): A tuple containing the latitude and longitude of the last seen position.
+        sonde_data (SondeData): The parsed radiosonde data.
         landing_point (tuple): A tuple containing the latitude and longitude of the predicted landing position.
         sonde_number (str): The radiosonde identification number.
-        last_seen_time (datetime): The timestamp of the last seen position.
-        course (str): The course of the radiosonde at the last seen position.
-        altitude (str): The altitude of the radiosonde at the last seen position.
-        speed (float): The speed of the radiosonde at the last seen position.
         ground_height (float): The ground height at the landing position.
         time_to_ground (float): The time to ground in seconds.
         radiosondy_coords (tuple, optional): A tuple containing the latitude and longitude of a manual landing point. Defaults to None.
@@ -232,15 +224,15 @@ def create_gpx_file(
 
     gpx = gpxpy.gpx.GPX()
 
-    time_str = last_seen_time.strftime("%y%m%d_%H%M")
+    time_str = sonde_data.last_seen_time.strftime("%y%m%d_%H%M")
 
     # Create last seen waypoint
     last_seen_waypoint = gpxpy.gpx.GPXWaypoint()
-    last_seen_waypoint.latitude = last_seen[0]
-    last_seen_waypoint.longitude = last_seen[1]
+    last_seen_waypoint.latitude = sonde_data.lat
+    last_seen_waypoint.longitude = sonde_data.lon
     last_seen_waypoint.name = f"{sonde_number} Last Seen"
-    last_seen_waypoint.description = f"Course: {course}, Speed {speed}, Altitude: {altitude}, GroundHeight: {ground_height}"
-    last_seen_waypoint.symbol = "transport-airport"
+    last_seen_waypoint.description = f"Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}"
+    last_seen_waypoint.symbol = GPX_SYMBOL_LAST_SEEN
     gpx.waypoints.append(last_seen_waypoint)
 
     # Create landing point waypoint
@@ -249,7 +241,7 @@ def create_gpx_file(
     landing_point_waypoint.longitude = landing_point[1]
     landing_point_waypoint.name = f"{sonde_number} Predicted Landing"
     landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}, LandingTime: {time_str}"
-    landing_point_waypoint.symbol = "z-ico01"
+    landing_point_waypoint.symbol = GPX_SYMBOL_PREDICTED_LANDING
     gpx.waypoints.append(landing_point_waypoint)
 
     # Create manual landing point waypoint if coords are provided
@@ -260,7 +252,7 @@ def create_gpx_file(
         radiosondy_waypoint.name = f"{sonde_number} radiosondy Landing Point"
         if radiosondy_coords_description:
             radiosondy_waypoint.description = radiosondy_coords_description
-        radiosondy_waypoint.symbol = "z-ico02"
+        radiosondy_waypoint.symbol = GPX_SYMBOL_RADIOSONDY_LANDING
         gpx.waypoints.append(radiosondy_waypoint)
 
     try:
@@ -318,22 +310,10 @@ def main():
 
     html_content = fetch_website_content(args.url)
     if html_content:
-        (
-            last_seen,
-            landing_point,
-            last_seen_time,
-            course,
-            altitude,
-            speed,
-            ground_height,
-            time_to_ground,
-        ) = get_coordinates(html_content)
+        sonde_data, landing_point, ground_height, time_to_ground = get_coordinates(html_content)
         if (
-            last_seen
+            sonde_data
             and landing_point
-            and last_seen_time
-            and course is not None
-            and altitude is not None
         ):
             match = re.search(r"sondenumber=([A-Z0-9]+)", args.url)
             if match:
@@ -366,13 +346,9 @@ def main():
                         )
 
                 filename = create_gpx_file(
-                    last_seen,
+                    sonde_data,
                     landing_point,
                     sonde_number,
-                    last_seen_time,
-                    course,
-                    altitude,
-                    speed,
                     ground_height,
                     time_to_ground,
                     radiosondy_coords,
