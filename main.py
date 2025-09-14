@@ -2,7 +2,6 @@ import argparse
 import math
 import os
 import re
-import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import gpxpy
@@ -59,6 +58,8 @@ def calculate_landing_point(
     print(f"  - Speed: {speed} m/s")
     print(f"  - Course: {course} degrees")
     print(f"  - Descent Rate: {descent_rate} m/s")
+
+    global time_to_ground
 
     time_to_ground = height_to_descend / descent_rate
     print(f"  - Time to Ground: {time_to_ground} s")
@@ -153,12 +154,9 @@ def get_coordinates(html_content):
 
     # Find ground height
     try:
-        b_tag = soup.find("b", string=re.compile(r"Bodenhöhe:"))
-        if b_tag:
-            parent_text = b_tag.parent.get_text()
-            ground_height_match = re.search(r"Bodenhöhe:\s*(\d+)\s*m", parent_text)
-            if ground_height_match:
-                ground_height = float(ground_height_match.group(1))
+        ground_altitude_match = re.search(r"Ground Altitude: (\d+) m", html_content)
+        if ground_altitude_match:
+            ground_height = float(ground_altitude_match.group(1))
     except Exception as e:
         print(f"Could not parse ground height: {e}")
 
@@ -189,11 +187,28 @@ def get_coordinates(html_content):
 
     print(f"landing_point: {landing_point}")
 
-    return last_seen, landing_point, last_seen_time, course, altitude
+    return (
+        last_seen,
+        landing_point,
+        last_seen_time,
+        course,
+        altitude,
+        speed,
+        ground_height,
+        time_to_ground,
+    )
 
 
 def create_gpx_file(
-    last_seen, landing_point, sonde_number, last_seen_time, course, altitude
+    last_seen,
+    landing_point,
+    sonde_number,
+    last_seen_time,
+    course,
+    altitude,
+    speed,
+    ground_height,
+    time_to_ground,
 ):
     """Creates a GPX file with waypoints for the last seen and landing point.
 
@@ -208,25 +223,30 @@ def create_gpx_file(
     Returns:
         str: The filename of the created GPX file, or None if an error occurred.
     """
+
     gpx = gpxpy.gpx.GPX()
+
+    time_str = last_seen_time.strftime("%y%m%d_%H%M")
 
     # Create last seen waypoint
     last_seen_waypoint = gpxpy.gpx.GPXWaypoint()
     last_seen_waypoint.latitude = last_seen[0]
     last_seen_waypoint.longitude = last_seen[1]
-    last_seen_waypoint.name = "Last Seen"
-    last_seen_waypoint.description = f"Course: {course}, Altitude: {altitude}"
+    last_seen_waypoint.name = f"{sonde_number} Last Seen"
+    last_seen_waypoint.description = f"Course: {course}, Speed {speed}, Altitude: {altitude}, GroundHeight: {ground_height}"
+    last_seen_waypoint.symbol = "transport-airport"
     gpx.waypoints.append(last_seen_waypoint)
 
     # Create landing point waypoint
     landing_point_waypoint = gpxpy.gpx.GPXWaypoint()
     landing_point_waypoint.latitude = landing_point[0]
     landing_point_waypoint.longitude = landing_point[1]
-    landing_point_waypoint.name = "Predicted Landing"
+    landing_point_waypoint.name = f"{sonde_number} Predicted Landing"
+    landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}, LandingTime: {time_str}"
+    landing_point_waypoint.symbol = "z-ico01"
     gpx.waypoints.append(landing_point_waypoint)
 
     try:
-        time_str = last_seen_time.strftime("%y%m%d_%H%M")
         filename = f"gpx/{sonde_number}_{time_str}_gpx_waypoint.gpx"
         with open(filename, "w") as f:
             f.write(gpx.to_xml())
@@ -277,9 +297,16 @@ def main():
 
     html_content = fetch_website_content(args.url)
     if html_content:
-        last_seen, landing_point, last_seen_time, course, altitude = get_coordinates(
-            html_content
-        )
+        (
+            last_seen,
+            landing_point,
+            last_seen_time,
+            course,
+            altitude,
+            speed,
+            ground_height,
+            time_to_ground,
+        ) = get_coordinates(html_content)
         if (
             last_seen
             and landing_point
@@ -297,6 +324,9 @@ def main():
                     last_seen_time,
                     course,
                     altitude,
+                    speed,
+                    ground_height,
+                    time_to_ground,
                 )
                 if filename:
                     import asyncio
