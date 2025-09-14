@@ -116,3 +116,25 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 ## License
 
 This project is licensed under the MIT License.
+
+## Releasing
+
+To mark a new commit as a release (e.g., `x.y.z`), you typically use Git tags. Here's how:
+
+1.  **Create an annotated tag:** This is the recommended way for releases as it includes metadata like the tagger's name, email, and date, along with a message.
+    ```bash
+    git tag -a vX.Y.Z -m "Release vX.Y.Z"
+    ```
+    Replace `vX.Y.Z` with your desired version number (e.g., `v1.0.0`). The `-m` flag allows you to add a descriptive message for the release.
+
+2.  **Push the tag to your remote repository:** By default, `git push` does not push tags. You need to explicitly push them.
+    *   To push a specific tag:
+        ```bash
+        git push origin vX.Y.Z
+        ```
+    *   To push all your local tags to the remote:
+        ```bash
+        git push origin --tags
+        ```
+
+After pushing the tag, it will be visible on your remote repository (e.g., GitHub, GitLab) and can often trigger release-related CI/CD workflows.
