@@ -1,7 +1,7 @@
 [project]
 name = "radiosondy-landed-waypoints"
 version = "1.0.0"
-description = "A Python script to extract radiosonde landing coordinates and generate a GPX file."
+description = "A Python script to extract radiosonde landing coordinates and generate a GPX file. By Nickl"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
