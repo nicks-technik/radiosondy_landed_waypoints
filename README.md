@@ -136,3 +136,36 @@ This project uses an automated release workflow via GitHub Actions. To create a 
     *   Create a GitHub Release associated with the tag, including release notes.
 
 This automates the process of keeping `pyproject.toml` in sync with your release tags and creating formal GitHub Releases.
+
+## Manual Test Execution
+
+To run the project's tests manually:
+
+1.  **Ensure `uv` is installed:**
+    If you don't have `uv` installed, you can install it using `pip`:
+    ```bash
+    pip install uv
+    ```
+
+2.  **Create and activate a virtual environment:**
+    It's best practice to run tests within a virtual environment to isolate dependencies.
+    ```bash
+    uv venv
+    source .venv/bin/activate
+    ```
+
+3.  **Install project dependencies and test runners:**
+    Install your project's dependencies, along with `ruff`, `pytest`, and `pytest-asyncio`:
+    ```bash
+    uv pip install -e . ruff pytest pytest-asyncio
+    ```
+
+4.  **Run the tests:**
+    Navigate to your project's root directory and run `pytest`. The `PYTHONPATH=$PWD` ensures that Python can find your `main` module.
+    ```bash
+    PYTHONPATH=$PWD uv run pytest tests/
+    ```
+    Alternatively, if your virtual environment is activated, you can just run:
+    ```bash
+    pytest tests/
+    ```
