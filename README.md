@@ -119,22 +119,20 @@ This project is licensed under the MIT License.
 
 ## Releasing
 
-To mark a new commit as a release (e.g., `x.y.z`), you typically use Git tags. Here's how:
+This project uses an automated release workflow via GitHub Actions. To create a new release:
 
-1.  **Create an annotated tag:** This is the recommended way for releases as it includes metadata like the tagger's name, email, and date, along with a message.
+1.  **Ensure your changes are merged into the `main` branch.**
+
+2.  **Create and push a new Git tag** with the desired version number (e.g., `v1.0.0`). The tag name should follow the `v*.*.*` pattern.
     ```bash
     git tag -a vX.Y.Z -m "Release vX.Y.Z"
+    git push origin vX.Y.Z
     ```
-    Replace `vX.Y.Z` with your desired version number (e.g., `v1.0.0`). The `-m` flag allows you to add a descriptive message for the release.
+    Replace `vX.Y.Z` with your actual version number (e.g., `v1.0.0`).
 
-2.  **Push the tag to your remote repository:** By default, `git push` does not push tags. You need to explicitly push them.
-    *   To push a specific tag:
-        ```bash
-        git push origin vX.Y.Z
-        ```
-    *   To push all your local tags to the remote:
-        ```bash
-        git push origin --tags
-        ```
+3.  **The GitHub Actions workflow will automatically:**
+    *   Update the `version` in `pyproject.toml` to match the tag.
+    *   Commit this version update back to the `main` branch.
+    *   Create a GitHub Release associated with the tag, including release notes.
 
-After pushing the tag, it will be visible on your remote repository (e.g., GitHub, GitLab) and can often trigger release-related CI/CD workflows.
+This automates the process of keeping `pyproject.toml` in sync with your release tags and creating formal GitHub Releases.
