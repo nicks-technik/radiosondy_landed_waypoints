@@ -441,7 +441,7 @@ class SondeProcessor:
             filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
             # Build GPX XML manually for maximum compatibility
             xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>']
-            xml_lines.append('<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" creator="gpx.py -- https://github.com/tkrajina/gpxpy">')
+            xml_lines.append('<gpx version="1.1" creator="gpx.py">')
             
             # Last Seen waypoint
             xml_lines.append(f'  <wpt lat="{sonde_data.last_seen_coords.lat}" lon="{sonde_data.last_seen_coords.lon}">')
