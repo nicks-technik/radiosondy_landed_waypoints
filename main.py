@@ -329,9 +329,38 @@ class SondeProcessor:
 
         try:
             filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
+            # Build GPX XML manually for maximum compatibility
+            xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>']
+            xml_lines.append('<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd" version="1.1" creator="gpx.py -- https://github.com/tkrajina/gpxpy">')
+            
+            # Last Seen waypoint
+            xml_lines.append(f'  <wpt lat="{sonde_data.last_seen_coords.lat}" lon="{sonde_data.last_seen_coords.lon}">')
+            xml_lines.append(f'    <name>{self.sonde_number} Last Seen</name>')
+            xml_lines.append(f'    <desc>Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}</desc>')
+            xml_lines.append(f'    <sym>{GPX_SYMBOL_LAST_SEEN}</sym>')
+            xml_lines.append('  </wpt>')
+            
+            # Predicted Landing waypoint
+            xml_lines.append(f'  <wpt lat="{landing_point.lat}" lon="{landing_point.lon}">')
+            xml_lines.append(f'    <name>{self.sonde_number} My Predicted Landing</name>')
+            xml_lines.append(f'    <desc>Time2Ground: {time_to_ground}, GroundHeight: {ground_height}</desc>')
+            xml_lines.append(f'    <sym>{GPX_SYMBOL_PREDICTED_LANDING}</sym>')
+            xml_lines.append('  </wpt>')
+            
+            # Radiosondy coords waypoint
+            if self.radiosondy_coords:
+                xml_lines.append(f'  <wpt lat="{self.radiosondy_coords.lat}" lon="{self.radiosondy_coords.lon}">')
+                xml_lines.append(f'    <name>{self.sonde_number} radiosondy Landing Point</name>')
+                xml_lines.append(f'    <desc>{self.radiosondy_coords_description}</desc>')
+                xml_lines.append(f'    <sym>{GPX_SYMBOL_RADIOSONDY_LANDING}</sym>')
+                xml_lines.append('  </wpt>')
+            
+            xml_lines.append('</gpx>')
+            xml_content = '\n'.join(xml_lines)
+            
             # Write with explicit UTF-8 encoding and Unix line endings for maximum compatibility
             with open(filename, "w", encoding="utf-8", newline="\n") as f:
-                f.write(gpx.to_xml())
+                f.write(xml_content)
             logger.info(f"Successfully created {filename}")
             return filename
         except IOError as e:
