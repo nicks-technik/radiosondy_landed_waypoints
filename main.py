@@ -102,6 +102,67 @@ class SondeProcessor:
             logger.error(f"Error fetching website content: {e}")
             return None
 
+    def fetch_prediction_kml(self) -> str | None:
+        """Fetches the prediction KML file for the sonde."""
+        try:
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            })
+            
+            # Build prediction URL from radiosondy.info
+            kml_url = f"https://radiosondy.info/local_storage/PREDICT/{self.sonde_number}_predict.kml"
+            logger.info(f"Fetching prediction KML from: {kml_url}")
+            
+            response = session.get(kml_url)
+            if response.status_code == 200:
+                logger.info("Successfully fetched prediction KML data")
+                return response.text
+            else:
+                logger.warning(f"Prediction KML returned status {response.status_code}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching prediction KML: {e}")
+            return None
+
+    def parse_prediction_kml(self, kml_content: str) -> tuple[Coordinates | None, str | None]:
+        """Parses the prediction KML to extract landing coordinates and timestamp."""
+        if not kml_content:
+            return None, None
+            
+        try:
+            # Use regex to find the Balloon Landing placemark
+            landing_pattern = r'<name>Balloon Landing</name>.*?<description>([^<]*)</description>.*?<coordinates>([^<]+)</coordinates>'
+            match = re.search(landing_pattern, kml_content, re.DOTALL | re.IGNORECASE)
+            
+            if match:
+                description = match.group(1)
+                coord_str = match.group(2).strip()
+                
+                # Parse coordinates (format: lon,lat,alt)
+                coord_parts = coord_str.split(',')
+                if len(coord_parts) >= 2:
+                    lon = float(coord_parts[0])
+                    lat = float(coord_parts[1])
+                    coords = Coordinates(lat=lat, lon=lon)
+                    
+                    # Extract timestamp from description (format: "Balloon landing at 49.91424,9.51475 at 2026-08-11T11:53:27.125Z.")
+                    time_match = re.search(r'at (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)', description)
+                    if time_match:
+                        timestamp = time_match.group(1)
+                        logger.info(f"Parsed prediction: ({lat}, {lon}) at {timestamp}")
+                        return coords, timestamp
+                    
+                    logger.info(f"Parsed prediction coordinates: ({lat}, {lon})")
+                    return coords, None
+                    
+        except (AttributeError, IndexError, ValueError) as e:
+            logger.error(f"Could not parse prediction KML: {e}")
+            
+        return None, None
+
     def calculate_landing_point(
         self,
         coords: Coordinates,
@@ -265,6 +326,7 @@ class SondeProcessor:
             gpx.waypoints.append(radiosondy_waypoint)
             logger.info(f"radiosondy_coords: {self.radiosondy_coords}")
 
+
         try:
             filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
             # Write with explicit UTF-8 encoding and Unix line endings for maximum compatibility
@@ -316,6 +378,29 @@ async def main():
 
     if not processor.sonde_number:
         return
+
+    # If --coords not provided, try to fetch prediction data from KML
+    if not processor.coords or not processor.radiosondy_coords:
+        kml_content = processor.fetch_prediction_kml()
+        if kml_content:
+            pred_coords, timestamp = processor.parse_prediction_kml(kml_content)
+            if pred_coords and timestamp:
+                # Format like the --coords parameter
+                coords_str = f"{pred_coords.lat},{pred_coords.lon} at {timestamp}"
+                # Parse it
+                coords_match = re.match(
+                    r"([\d.\-]+),([\d.\-]+)(\s+at\s+(.*))", coords_str
+                )
+                if coords_match:
+                    processor.radiosondy_coords = Coordinates(
+                        lat=float(coords_match.group(1)),
+                        lon=float(coords_match.group(2))
+                    )
+                    processor.radiosondy_coords_description = coords_match.group(4)
+                    logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
+            elif pred_coords:
+                processor.radiosondy_coords = pred_coords
+                logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
 
     html_content = processor.fetch_website_content()
     if html_content:
