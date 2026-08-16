@@ -92,15 +92,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gpxpy"
-version = "1.6.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/20/ad/6f1a34e702c72cb495bb258396f237ded76c00f9fe67054a44d778d24ed9/gpxpy-1.6.2.tar.gz", hash = "sha256:a72c484b97ec42b80834353b029cc8ee1b79f0ffca1179b2210bb3baf26c01ae", size = 111695, upload-time = "2023-11-29T17:25:38.391Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/9f/62df6c1e52462bdd04275b36cec49efa9e8af7e7b834499eb288f73dcfbc/gpxpy-1.6.2-py3-none-any.whl", hash = "sha256:289bc2d80f116c988d0a1e763fda22838f83005573ece2bbc6521817b26fb40a", size = 42649, upload-time = "2023-11-29T17:25:35.76Z" },
-]
-
-[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -147,21 +138,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyaes"
-version = "1.6.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/44/66/2c17bae31c906613795711fc78045c285048168919ace2220daa372c7d72/pyaes-1.6.1.tar.gz", hash = "sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f", size = 28536, upload-time = "2017-09-20T21:17:54.23Z" }
-
-[[package]]
-name = "pyasn1"
-version = "0.6.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/e9/01f1a64245b89f039897cb0130016d79f77d52669aae6ee7b159a6c4c018/pyasn1-0.6.1.tar.gz", hash = "sha256:6f580d2bdd84365380830acf45550f2511469f673cb4a5ae3857a3170128b034", size = 145322, upload-time = "2024-09-10T22:41:42.55Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/f1/d6a797abb14f6283c0ddff96bbdd46937f64122b8c925cab503dd37f8214/pyasn1-0.6.1-py3-none-any.whl", hash = "sha256:0d632f46f2ba09143da3a8afe9e33fb6f92fa2320ab7e886e2d0f7672af84629", size = 83135, upload-time = "2024-09-11T16:00:36.122Z" },
-]
-
-[[package]]
 name = "python-dotenv"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -188,21 +164,17 @@ version = "1.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
-    { name = "gpxpy" },
     { name = "python-dotenv" },
     { name = "python-telegram-bot" },
     { name = "requests" },
-    { name = "telethon" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.13.5" },
-    { name = "gpxpy", specifier = ">=1.6.2" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "python-telegram-bot", specifier = ">=22.3" },
     { name = "requests", specifier = ">=2.32.5" },
-    { name = "telethon", specifier = ">=1.41.2" },
 ]
 
 [[package]]
@@ -218,18 +190,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf", size = 134517, upload-time = "2025-08-18T20:46:02.573Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1e/db/4254e3eabe8020b458f1a747140d32277ec7a271daf1d235b70dc0b4e6e3/requests-2.32.5-py3-none-any.whl", hash = "sha256:2462f94637a34fd532264295e186976db0f5d453d1cdd31473c85a6a161affb6", size = 64738, upload-time = "2025-08-18T20:46:00.542Z" },
-]
-
-[[package]]
-name = "rsa"
-version = "4.9.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyasn1" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
 ]
 
 [[package]]
@@ -251,19 +211,6 @@ wheels = [
 ]
 
 [[package]]
-name = "telethon"
-version = "1.41.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyaes" },
-    { name = "rsa" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/86/6a/3fc30b39eac0a8c770418c0f393d3ff040b9205938a1492d60f08934e97a/telethon-1.41.2.tar.gz", hash = "sha256:300a3441df62668378626b46cafda346573e9ac296367182510756334d2bdc5e", size = 669173, upload-time = "2025-09-04T19:08:02.026Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/e0/2fb26c432ee4259a6d4ab427196b84a2b0c81db232337b02cf2a09df1896/telethon-1.41.2-py3-none-any.whl", hash = "sha256:28b6b1023a0753a32039e6d1fda4b63cac138ce894cd5cbcac1d5ddd2f8426d8", size = 744889, upload-time = "2025-09-04T19:08:00.181Z" },
-]
-
-[[package]]
 name = "typing-extensions"
 version = "4.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -274,9 +221,9 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.5.0"
+version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/15/22/9ee70a2574a4f4599c47dd506532914ce044817c7752a79b6a51286319bc/urllib3-2.5.0.tar.gz", hash = "sha256:3fc47733c7e419d4bc3f6b3dc2b4f890bb743906a30d56ba4a5bfa4bbff92760", size = 393185, upload-time = "2025-06-18T14:07:41.644Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/c2/fe1e52489ae3122415c51f387e221dd0773709bad6c6cdaa599e8a2c5185/urllib3-2.5.0-py3-none-any.whl", hash = "sha256:e6b01673c0fa6a13e374b50871808eb3bf7046c4b125b216f6bf1cc604cff0dc", size = 129795, upload-time = "2025-06-18T14:07:40.39Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
 ]
