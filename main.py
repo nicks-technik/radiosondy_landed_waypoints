@@ -218,6 +218,24 @@ class SondeProcessor:
         """Parses the HTML to find the last seen coordinates, time, course, altitude and speed."""
         try:
             aprs_data_table = soup.find("table", id=APRS_DATA_TABLE_ID)
+            if aprs_data_table is None:
+                # Try alternative table IDs or formats
+                tables = soup.find_all('table')
+                if tables:
+                    # Try first table with data rows
+                    for table in tables:
+                        rows = table.find_all('tr')
+                        if rows and len(rows) > 1:
+                            cells = rows[0].find_all(['th', 'td'])
+                            cell_text = [cell.get_text(strip=True) for cell in cells]
+                            if any('Date' in text or 'Time' in text for text in cell_text):
+                                aprs_data_table = table
+                                break
+            
+            if aprs_data_table is None:
+                logger.warning("Could not find APRS data table in page. Trying GeoJSON endpoint.")
+                return self.parse_last_seen_from_geojson()
+                
             first_row = aprs_data_table.find("tbody").find("tr")
             cells = first_row.find_all("td")
             last_seen_time_str = cells[2].text
@@ -245,7 +263,130 @@ class SondeProcessor:
             )
         except (AttributeError, IndexError, ValueError) as e:
             logger.error(f"Could not parse last seen data: {e}")
-            return None
+            # Fallback to GeoJSON endpoint
+            return self.parse_last_seen_from_geojson()
+
+    def parse_last_seen_from_geojson(self) -> SondeData | None:
+        """Parses the GeoJSON file for last seen data when the HTML table is unavailable."""
+        try:
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            })
+            
+            # Try multiple URL patterns for GeoJSON
+            # sonde.php pages use export/export_map.php endpoint
+            geojson_urls = [
+                f"https://radiosondy.info/export/export_map.php?sonde_map=1&sondenumber={self.sonde_number}",
+                f"https://radiosondy.info/local_storage/GeoJSON/{self.sonde_number}.json",
+                f"https://radiosondy.info/local_storage/GeoJSON/{self.sonde_number[0]}/{self.sonde_number}.json",
+            ]
+            
+            data = None
+            for url in geojson_urls:
+                logger.info(f"Fetching GeoJSON from: {url}")
+                response = session.get(url)
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        logger.info("Successfully fetched GeoJSON data")
+                        break
+                    except Exception as json_err:
+                        logger.debug(f"JSON parse failed for {url}: {json_err}")
+                        continue
+                        
+            if not data:
+                logger.warning("Could not fetch GeoJSON from any URL pattern")
+                return None
+                
+            # Look for the sonde data point (Point features with properties)
+            for feature in data.get('features', []):
+                props = feature.get('properties', {})
+                coords = feature.get('geometry', {}).get('coordinates', [])
+                
+                # Skip LineString features (flight path)
+                geom_type = feature.get('geometry', {}).get('type')
+                if geom_type != 'Point':
+                    continue
+                    
+                # Look for Point features with telemetry data (indicates it's the last known position)
+                if len(coords) >= 3:
+                    lon, lat, alt = coords[0], coords[1], coords[2]
+                    
+                    # Check if this has telemetry data (indicates it's the last known position)
+                    report = props.get('report', '')
+                    popup_content = props.get('popupContent', '')
+                    # Strip HTML tags for easier regex parsing
+                    import html as html_module
+                    from html.parser import HTMLParser
+                    
+                    class StripTagsParser(HTMLParser):
+                        def __init__(self):
+                            super().__init__()
+                            self.result = []
+                        def handle_data(self, data):
+                            self.result.append(data)
+                        def get_text(self):
+                            return ''.join(self.result)
+                    
+                    parser = StripTagsParser()
+                    parser.feed(popup_content or '')
+                    clean_popup = parser.get_text()
+                    
+                    if report or props.get('speed') or props.get('course') or 'Report:' in (popup_content or ''):
+                        # Parse date/time from clean popup content
+                        time_match = re.search(r'Report:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})z', clean_popup, re.IGNORECASE)
+                        if not time_match:
+                            time_match = re.search(r'Report:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', clean_popup, re.IGNORECASE)
+                            
+                        if time_match:
+                            last_seen_time_str = time_match.group(1)
+                            last_seen_time = datetime.strptime(last_seen_time_str, "%Y-%m-%d %H:%M:%S")
+                        else:
+                            # Try using report field directly
+                            report_str = props.get('report', '')
+                            time_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', report_str, re.IGNORECASE)
+                            if time_match:
+                                last_seen_time = datetime.strptime(time_match.group(1), "%Y-%m-%d %H:%M:%S")
+                            else:
+                                last_seen_time = datetime.now()
+                        
+                        # Extract data from clean popup content
+                        course = 0.0
+                        speed_kmh = 0.0
+                        climb_rate = 0.0
+                        
+                        # Course
+                        course_match = re.search(r'Course:\s*([\d.]+)', clean_popup)
+                        if course_match:
+                            course = float(course_match.group(1))
+                        
+                        # Speed
+                        speed_match = re.search(r'Speed:\s*([\d.]+)', clean_popup)
+                        if speed_match:
+                            speed_kmh = float(speed_match.group(1))
+                        
+                        # Climbing/descent rate
+                        climbing_match = re.search(r'Climbing:\s*(-?[\d.]+)', clean_popup)
+                        if climbing_match:
+                            climb_rate = float(climbing_match.group(1))
+                             
+                        speed_mps = speed_kmh * 1000 / 3600 if speed_kmh > 0 else 0.0
+                        
+                        logger.info(f"last_seen (from GeoJSON): ({lat}, {lon}) at {last_seen_time}")
+                        return SondeData(
+                            last_seen_coords=Coordinates(lat=lat, lon=lon),
+                            last_seen_time=last_seen_time,
+                            course=course,
+                            altitude=alt,
+                            speed_mps=speed_mps,
+                            climb_rate=climb_rate,
+                        )
+                        
+        except Exception as e:
+            logger.error(f"Could not parse GeoJSON data: {e}")
+            
+        return None
 
     def get_coordinates(
         self, html_content: str
@@ -267,16 +408,19 @@ class SondeProcessor:
 
         if sonde_data:
             descent_rate = abs(sonde_data.climb_rate)
-            if descent_rate > 0:
-                landing_point_coords, time_to_ground = self.calculate_landing_point(
-                    sonde_data.last_seen_coords,
-                    sonde_data.altitude,
-                    sonde_data.speed_mps,
-                    sonde_data.course,
-                    descent_rate,
-                    ground_height,
-                )
-                landing_point = landing_point_coords
+            # Use default descent rate if not available
+            if descent_rate == 0:
+                descent_rate = 7.0
+                logger.info(f"Using default descent rate: {descent_rate} m/s")
+            landing_point_coords, time_to_ground = self.calculate_landing_point(
+                sonde_data.last_seen_coords,
+                sonde_data.altitude,
+                sonde_data.speed_mps,
+                sonde_data.course,
+                descent_rate,
+                ground_height,
+            )
+            landing_point = landing_point_coords
 
         logger.info(f"landing_point: {landing_point}")
 
@@ -289,43 +433,9 @@ class SondeProcessor:
         ground_height: float,
         time_to_ground: float,
     ) -> str | None:
-        """Creates a GPX file with waypoints for the last seen and landing point.
-        
-        Note: Custom symbols (sym elements) are omitted for better compatibility 
-        with GPS apps like Locus that may not recognize them.
-        """
-
-        gpx = gpxpy.gpx.GPX()
+        """Creates a GPX file with waypoints for the last seen and landing point."""
 
         time_str = sonde_data.last_seen_time.strftime("%y%m%d_%H%M")
-
-        last_seen_waypoint = gpxpy.gpx.GPXWaypoint()
-        last_seen_waypoint.latitude = sonde_data.last_seen_coords.lat
-        last_seen_waypoint.longitude = sonde_data.last_seen_coords.lon
-        last_seen_waypoint.name = f"{self.sonde_number} Last Seen"
-        last_seen_waypoint.description = f"Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}"
-        last_seen_waypoint.symbol = GPX_SYMBOL_LAST_SEEN
-        gpx.waypoints.append(last_seen_waypoint)
-
-        landing_point_waypoint = gpxpy.gpx.GPXWaypoint()
-        landing_point_waypoint.latitude = landing_point.lat
-        landing_point_waypoint.longitude = landing_point.lon
-        landing_point_waypoint.name = f"{self.sonde_number} My Predicted Landing"
-        landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}"
-        landing_point_waypoint.symbol = GPX_SYMBOL_PREDICTED_LANDING
-        gpx.waypoints.append(landing_point_waypoint)
-
-        if self.radiosondy_coords:
-            radiosondy_waypoint = gpxpy.gpx.GPXWaypoint()
-            radiosondy_waypoint.latitude = self.radiosondy_coords.lat
-            radiosondy_waypoint.longitude = self.radiosondy_coords.lon
-            radiosondy_waypoint.name = f"{self.sonde_number} radiosondy Landing Point"
-            if self.radiosondy_coords_description:
-                radiosondy_waypoint.description = self.radiosondy_coords_description
-            radiosondy_waypoint.symbol = GPX_SYMBOL_RADIOSONDY_LANDING
-            gpx.waypoints.append(radiosondy_waypoint)
-            logger.info(f"radiosondy_coords: {self.radiosondy_coords}")
-
 
         try:
             filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
@@ -351,7 +461,10 @@ class SondeProcessor:
             if self.radiosondy_coords:
                 xml_lines.append(f'  <wpt lat="{self.radiosondy_coords.lat}" lon="{self.radiosondy_coords.lon}">')
                 xml_lines.append(f'    <name>{self.sonde_number} radiosondy Landing Point</name>')
-                xml_lines.append(f'    <desc>{self.radiosondy_coords_description}</desc>')
+                if self.radiosondy_coords_description:
+                    xml_lines.append(f'    <desc>{self.radiosondy_coords_description}</desc>')
+                else:
+                    xml_lines.append('    <desc></desc>')
                 xml_lines.append(f'    <sym>{GPX_SYMBOL_RADIOSONDY_LANDING}</sym>')
                 xml_lines.append('  </wpt>')
             
@@ -404,32 +517,28 @@ async def main():
     args = parse_arguments()
 
     processor = SondeProcessor(args.url, args.coords)
-
     if not processor.sonde_number:
         return
 
-    # If --coords not provided, try to fetch prediction data from KML
-    if not processor.coords or not processor.radiosondy_coords:
-        kml_content = processor.fetch_prediction_kml()
-        if kml_content:
-            pred_coords, timestamp = processor.parse_prediction_kml(kml_content)
-            if pred_coords and timestamp:
-                # Format like the --coords parameter
-                coords_str = f"{pred_coords.lat},{pred_coords.lon} at {timestamp}"
-                # Parse it
-                coords_match = re.match(
-                    r"([\d.\-]+),([\d.\-]+)(\s+at\s+(.*))", coords_str
+    # Fetch prediction data first (works for both sonde.php and sonde_archive.php pages)
+    kml_content = processor.fetch_prediction_kml()
+    if kml_content:
+        pred_coords, timestamp = processor.parse_prediction_kml(kml_content)
+        if pred_coords and timestamp:
+            coords_str = f"{pred_coords.lat},{pred_coords.lon} at {timestamp}"
+            coords_match = re.match(
+                r"([\d.\-]+),([\d.\-]+)(\s+at\s+(.*))", coords_str
+            )
+            if coords_match:
+                processor.radiosondy_coords = Coordinates(
+                    lat=float(coords_match.group(1)),
+                    lon=float(coords_match.group(2))
                 )
-                if coords_match:
-                    processor.radiosondy_coords = Coordinates(
-                        lat=float(coords_match.group(1)),
-                        lon=float(coords_match.group(2))
-                    )
-                    processor.radiosondy_coords_description = coords_match.group(4)
-                    logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
-            elif pred_coords:
-                processor.radiosondy_coords = pred_coords
+                processor.radiosondy_coords_description = coords_match.group(4)
                 logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
+        elif pred_coords:
+            processor.radiosondy_coords = pred_coords
+            logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
 
     html_content = processor.fetch_website_content()
     if html_content:
