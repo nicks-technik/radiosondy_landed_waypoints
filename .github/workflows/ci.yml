@@ -1,5 +1,4 @@
 name: Python CI
-
 on:
   push:
     branches: [ main, develop, more_features ]
@@ -9,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
@@ -32,4 +30,4 @@ jobs:
       run: uv run ruff check .
 
     - name: Run tests
-      run: PYTHONPATH=$PWD uv run pytest tests/
+      run: PYTHONPATH=$PWD uv run pytest tests/ -v
