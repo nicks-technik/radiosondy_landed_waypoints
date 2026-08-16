@@ -30,35 +30,19 @@ This project provides a Python script to extract the last seen and predicted lan
 
 2.  **Run the Script:**
 
-    Execute the `main.py` script with either the sonde number or the URL of the radiosonde tracking page as an argument.
-
-    **Option 1: Using just the sonde number**
+    Execute the `main.py` script with the URL of the radiosonde tracking page as an argument:
 
     ```bash
-    uv run main.py <SONDE_NUMBER>
+    uv run python main.py <URL>
     ```
 
     For example:
 
     ```bash
-    uv run main.py D20040532
-    uv run main.py W2350755Z
+    uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792
     ```
 
-    **Option 2: Using the full URL**
-
-    ```bash
-    uv run main.py <URL>
-    ```
-
-    For example:
-
-    ```bash
-    uv run main.py https://radiosondy.info/sonde_archive.php?sondenumber=W1150792
-    uv run main.py https://radiosondy.info/sonde.php?sondenumber=X3432089
-    ```
-
-    Both options will generate the same result. The script will create a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/D20040532_260811_1152_gpx_waypoint.gpx`).
+    The script will generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).
 
     You can also provide manual coordinates for a landing point using the `--coords` flag. The coordinates can be in one of two formats:
     *   `'lat,lon'` (e.g., `'50.22794,9.40322'`)
@@ -68,7 +52,7 @@ This project provides a Python script to extract the last seen and predicted lan
 
     Example with manual coordinates:
     ```bash
-    uv run main.py D20040532 --coords '49.91424,9.51475 at 2026-08-11T11:53:27.125Z'
+    uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792 --coords '50.22794,9.40322 at 2025-09-12T13:05:49.25Z'
     ```
 
 ## Telegram Integration
