@@ -22,10 +22,8 @@ jobs:
         pip install beautifulsoup4 python-dotenv python-telegram-bot requests
         pip install ruff pytest pytest-asyncio
 
-    - name: Show ruff version and check
-      run: |
-        ruff --version
-        ruff check . 2>&1 || echo "RUFF_CHECK FAILED"
+    - name: Run ruff linter
+      run: ruff check .
 
     - name: Run tests
       run: PYTHONPATH=$PWD pytest tests/ -v
