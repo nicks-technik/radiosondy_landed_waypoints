@@ -20,12 +20,10 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install beautifulsoup4 python-dotenv python-telegram-bot requests
-        pip install ruff pytest pytest-asyncio
+        pip install "ruff==0.16.3" pytest pytest-asyncio
 
     - name: Run ruff linter
-      run: |
-        ruff --version
-        ruff check .
+      run: ruff check .
 
     - name: Run tests
       run: PYTHONPATH=$PWD pytest tests/ -v
