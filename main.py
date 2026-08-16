@@ -90,7 +90,10 @@ class SondeProcessor:
     def fetch_website_content(self) -> str | None:
         """Fetches the HTML content of a given URL."""
         try:
-            response = requests.get(self.url)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.get(self.url, headers=headers)
             response.raise_for_status()
             return response.text
         except requests.exceptions.RequestException as e:
