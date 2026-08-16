@@ -6,8 +6,20 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "beautifulsoup4>=4.13.5",
-    "gpxpy>=1.6.2",
     "python-dotenv>=1.1.1",
     "python-telegram-bot>=22.3",
     "requests>=2.32.5",
+]
+
+[tool.ruff]
+# Ignore certain rules for utility scripts
+extend-exclude = ["update_version.py", "find_chat_id.py"]
+
+[tool.ruff.lint]
+# Rules we want to ignore
+ignore = [
+    "DTZ005",  # Naive datetime - acceptable in this script
+    "DTZ007",  # Naive datetime - acceptable in this script
+    "BLE001",  # Do not catch blind exception - acceptable for error handling
+    "ASYNC230",  # Async functions opening files - acceptable for this use case
 ]

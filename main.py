@@ -8,8 +8,6 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 
-import gpxpy
-import gpxpy.gpx
 import requests
 import telegram
 from bs4 import BeautifulSoup
@@ -174,9 +172,7 @@ class SondeProcessor:
         ground_height: float,
     ) -> tuple[Coordinates, float]:
         """Calculates the predicted landing point based on last known position, altitude, speed, and course."""
-        height_to_descend = altitude - ground_height
-        if height_to_descend < 0:
-            height_to_descend = 0
+        height_to_descend = max(altitude - ground_height, 0)
 
         logger.info("Calculating landing point with:")
         logger.info(f"  - Altitude: {altitude} m")
@@ -318,7 +314,6 @@ class SondeProcessor:
                     report = props.get('report', '')
                     popup_content = props.get('popupContent', '')
                     # Strip HTML tags for easier regex parsing
-                    import html as html_module
                     from html.parser import HTMLParser
                     
                     class StripTagsParser(HTMLParser):
@@ -477,7 +472,7 @@ class SondeProcessor:
                 f.write(xml_content)
             logger.info(f"Successfully created {filename}")
             return filename
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Error writing GPX file: {e}")
             return None
 
