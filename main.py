@@ -38,7 +38,6 @@ class Coordinates:
 @dataclass
 class SondeData:
     """Holds the parsed data for a radiosonde."""
-
     last_seen_coords: Coordinates
     last_seen_time: datetime
     course: float
@@ -90,7 +89,13 @@ class SondeProcessor:
     def fetch_website_content(self) -> str | None:
         """Fetches the HTML content of a given URL."""
         try:
-            response = requests.get(self.url)
+            session = requests.Session()
+            session.headers.update({
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            })
+            response = session.get(self.url)
             response.raise_for_status()
             return response.text
         except requests.exceptions.RequestException as e:
@@ -223,7 +228,11 @@ class SondeProcessor:
         ground_height: float,
         time_to_ground: float,
     ) -> str | None:
-        """Creates a GPX file with waypoints for the last seen and landing point."""
+        """Creates a GPX file with waypoints for the last seen and landing point.
+        
+        Note: Custom symbols (sym elements) are omitted for better compatibility 
+        with GPS apps like Locus that may not recognize them.
+        """
 
         gpx = gpxpy.gpx.GPX()
 
@@ -240,8 +249,8 @@ class SondeProcessor:
         landing_point_waypoint = gpxpy.gpx.GPXWaypoint()
         landing_point_waypoint.latitude = landing_point.lat
         landing_point_waypoint.longitude = landing_point.lon
-        landing_point_waypoint.name = f"{self.sonde_number} Predicted Landing"
-        landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}, LandingTime: {time_str}"
+        landing_point_waypoint.name = f"{self.sonde_number} My Predicted Landing"
+        landing_point_waypoint.description = f"Time2Ground: {time_to_ground}, GroundHeight: {ground_height}"
         landing_point_waypoint.symbol = GPX_SYMBOL_PREDICTED_LANDING
         gpx.waypoints.append(landing_point_waypoint)
 
@@ -258,7 +267,8 @@ class SondeProcessor:
 
         try:
             filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
-            with open(filename, "w") as f:
+            # Write with explicit UTF-8 encoding and Unix line endings for maximum compatibility
+            with open(filename, "w", encoding="utf-8", newline="\n") as f:
                 f.write(gpx.to_xml())
             logger.info(f"Successfully created {filename}")
             return filename
