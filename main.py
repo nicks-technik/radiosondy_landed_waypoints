@@ -547,6 +547,9 @@ async def main():
                 logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
         elif pred_coords:
             processor.radiosondy_coords = pred_coords
+            # Set a default description if no timestamp is available
+            # Use "Prediction" as fallback instead of empty description
+            processor.radiosondy_coords_description = "radiosondy.info prediction"
             logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
 
     html_content = processor.fetch_website_content()
