@@ -49,18 +49,27 @@ class SondeData:
 
 class SondeProcessor:
     def __init__(self, url: str, coords: str | None = None):
-        self.url = url
-        self.coords = coords
         self.sonde_number = self._extract_sonde_number(url)
+        if not self.sonde_number:
+            return
+        # Build the canonical URL
+        self.url = (
+            f"https://radiosondy.info/sonde_archive.php?sondenumber={self.sonde_number}"
+        )
+        self.coords = coords
         self.radiosondy_coords = None
         self.radiosondy_coords_description = None
         self._parse_radiosondy_coords()
 
-    def _extract_sonde_number(self, url: str) -> str | None:
-        match = re.search(r"sondenumber=([A-Z0-9]+)", url)
+    def _extract_sonde_number(self, url_or_sonde: str) -> str | None:
+        # Check if it's already a bare sonde number (e.g., D20040532 or W2350755Z)
+        if re.match(r'^[A-Z]\d+[A-Z]?$', url_or_sonde):
+            return url_or_sonde
+        # Extract from full URL
+        match = re.search(r"sondenumber=([A-Z0-9]+)", url_or_sonde)
         if match:
             return match.group(1)
-        logger.warning("Could not extract sonde number from URL.")
+        logger.warning("Could not extract sonde number from input.")
         return None
 
     def _parse_radiosondy_coords(self):
@@ -510,9 +519,21 @@ class SondeProcessor:
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Generate a GPX waypoint file from a radiosonde tracking website."
+        description="Generate a GPX waypoint file from a radiosonde tracking website.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s D20040532
+  %(prog)s W2350755Z
+  %(prog)s https://radiosondy.info/sonde_archive.php?sondenumber=D20040532
+  %(prog)s https://radiosondy.info/sonde.php?sondenumber=W2350755Z
+  %(prog)s D20040532 --coords "49.9154,9.5234"
+        """
     )
-    parser.add_argument("url", help="The URL of the radiosonde tracking website.")
+    parser.add_argument(
+        "sonde",
+        help="Sonde number (e.g., D20040532) or full radiosondy.info URL (e.g., https://radiosondy.info/sonde_archive.php?sondenumber=D20040532)"
+    )
     parser.add_argument(
         "--coords",
         help="Optional coordinates in format 'lat,lon' to add as a waypoint.",
@@ -525,7 +546,7 @@ async def main():
     load_dotenv()
     args = parse_arguments()
 
-    processor = SondeProcessor(args.url, args.coords)
+    processor = SondeProcessor(args.sonde, args.coords)
     if not processor.sonde_number:
         return
 
