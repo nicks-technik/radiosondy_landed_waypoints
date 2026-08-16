@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -491,10 +492,18 @@ class SondeProcessor:
 
         try:
             bot = telegram.Bot(token=bot_token)
-            with open(file_path, "rb") as f:
-                logger.info(f"Trying to send {file_path} to Telegram")
+            # Create a ZIP file to avoid Telegram corrupting the GPX during transfer
+            zip_filename = file_path.replace(".gpx", ".zip")
+            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.write(file_path, os.path.basename(file_path))
+            
+            logger.info(f"Sending {file_path} as ZIP to Telegram")
+            with open(zip_filename, "rb") as f:
                 await bot.send_document(chat_id=chat_id, document=f)
-            logger.info(f"Successfully sent {file_path} to Telegram.")
+            logger.info(f"Successfully sent {file_path} (as ZIP) to Telegram.")
+            
+            # Clean up the ZIP file
+            os.remove(zip_filename)
         except Exception as e:
             logger.error(f"Error sending file to Telegram: {e}")
 
