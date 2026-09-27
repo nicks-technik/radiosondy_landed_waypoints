@@ -2,10 +2,13 @@ import asyncio
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
+from contextlib import chdir
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, "/home/hermes/dev/radiosondy_landed_waypoints")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from main import (
     APRS_DATA_TABLE_ID,
     EARTH_RADIUS_KM,
@@ -89,6 +92,12 @@ class TestSondeProcessorURLParsing(unittest.TestCase):
         url = "https://radiosondy.info/sonde_archive.php?sondenumber=W2350755Z"
         processor = SondeProcessor(url, None)
         self.assertEqual(processor.sonde_number, "W2350755Z")
+
+    def test_extract_sonde_number_lowercase(self):
+        """Test extracting sonde number with lowercase letters"""
+        url = "https://radiosondy.info/sonde.php?sondenumber=w2350755z"
+        processor = SondeProcessor(url, None)
+        self.assertEqual(processor.sonde_number, "w2350755z")
 
     def test_invalid_url_returns_none(self):
         """Test URL without sonde number"""
@@ -308,6 +317,64 @@ class TestGPXFileGeneration(unittest.TestCase):
             _ = processor.create_gpx_file(
                 sonde_data, landing_point, 225.0, 45.57
             )
+
+    def test_create_gpx_file_refuses_path_traversal(self):
+        """GPX output must stay inside the gpx/ directory even if the
+        sonde number ever contains path characters"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089", None
+        )
+        processor.sonde_number = "../../evil"
+
+        sonde_data = SondeData(
+            last_seen_coords=Coordinates(lat=51.0, lon=7.0),
+            last_seen_time=datetime(2026, 9, 27, 12, 0, 0, tzinfo=UTC),
+            course=180.0,
+            altitude=100.0,
+            speed_mps=5.0,
+            climb_rate=-5.0,
+        )
+        landing_point = Coordinates(lat=50.9, lon=7.1)
+
+        result = processor.create_gpx_file(sonde_data, landing_point, 0.0, 600.0)
+
+        self.assertIsNone(result)
+        self.assertFalse(list(Path(".").glob("evil_*")))
+        self.assertFalse(list(Path("..").glob("evil_*")))
+
+    def test_create_gpx_file_well_formed_xml_with_special_characters(self):
+        """Real GPX write stays well-formed XML and round-trips descriptions
+        containing XML special characters"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089", None
+        )
+        processor.radiosondy_coords = Coordinates(lat=50.9, lon=7.1)
+        processor.radiosondy_coords_description = 'landed <near> & "here"'
+
+        sonde_data = SondeData(
+            last_seen_coords=Coordinates(lat=51.0, lon=7.0),
+            last_seen_time=datetime(2026, 9, 27, 12, 0, 0, tzinfo=UTC),
+            course=180.0,
+            altitude=100.0,
+            speed_mps=5.0,
+            climb_rate=-5.0,
+        )
+        landing_point = Coordinates(lat=50.95, lon=7.05)
+
+        with tempfile.TemporaryDirectory() as tmpdir, chdir(tmpdir):
+            Path("gpx").mkdir()
+            filename = processor.create_gpx_file(
+                sonde_data, landing_point, 100.0, 20.0
+            )
+
+            self.assertIsNotNone(filename)
+            tree = ET.parse(filename)
+            waypoints = tree.getroot().findall("wpt")
+            self.assertEqual(len(waypoints), 3)
+            names = [wpt.findtext("name") for wpt in waypoints]
+            descs = [wpt.findtext("desc") for wpt in waypoints]
+            self.assertIn("X3432089 radiosondy Landing Point", names)
+            self.assertIn('landed <near> & "here"', descs)
 
     def test_gpx_symbols_in_output(self):
         """Test that symbols are present in GPX output"""

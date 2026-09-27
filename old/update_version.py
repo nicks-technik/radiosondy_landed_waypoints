@@ -1,9 +1,9 @@
 import toml
 import sys
-import os
+from pathlib import Path
 
 def update_pyproject_version(new_version: str):
-    pyproject_path = os.path.join(os.path.dirname(__file__), "pyproject.toml")
+    pyproject_path = Path(__file__).resolve().parent / "pyproject.toml"
     
     try:
         with open(pyproject_path, "r") as f:
