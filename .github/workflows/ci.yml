@@ -23,7 +23,7 @@ jobs:
         pip install ruff pytest pytest-asyncio
 
     - name: Run ruff linter
-      run: ruff check . || echo "Linting issues detected"
+      run: ruff check .
 
     - name: Run tests
       run: PYTHONPATH=$PWD pytest tests/ -v
