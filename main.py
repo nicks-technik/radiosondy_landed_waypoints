@@ -7,6 +7,8 @@ import re
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from xml.sax.saxutils import escape
 
 import requests
 import telegram
@@ -19,6 +21,12 @@ GPX_SYMBOL_LAST_SEEN = "transport-airport"
 GPX_SYMBOL_PREDICTED_LANDING = "z-ico01"
 GPX_SYMBOL_RADIOSONDY_LANDING = "z-ico02"
 APRS_DATA_TABLE_ID = "Table7"
+REQUEST_TIMEOUT_S = 30
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
 
 # Configure logging
@@ -52,10 +60,12 @@ class SondeProcessor:
         self.sonde_number = self._extract_sonde_number(url)
         self.radiosondy_coords = None
         self.radiosondy_coords_description = None
+        self._session = requests.Session()
+        self._session.headers.update(HTTP_HEADERS)
         self._parse_radiosondy_coords()
 
     def _extract_sonde_number(self, url: str) -> str | None:
-        match = re.search(r"sondenumber=([A-Z0-9]+)", url)
+        match = re.search(r"sondenumber=([A-Za-z0-9]+)", url)
         if match:
             return match.group(1)
         logger.warning("Could not extract sonde number from URL.")
@@ -88,13 +98,7 @@ class SondeProcessor:
     def fetch_website_content(self) -> str | None:
         """Fetches the HTML content of a given URL."""
         try:
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            })
-            response = session.get(self.url)
+            response = self._session.get(self.url, timeout=REQUEST_TIMEOUT_S)
             response.raise_for_status()
             return response.text
         except requests.exceptions.RequestException as e:
@@ -104,18 +108,10 @@ class SondeProcessor:
     def fetch_prediction_kml(self) -> str | None:
         """Fetches the prediction KML file for the sonde."""
         try:
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-            })
-            
             # Build prediction URL from radiosondy.info
             kml_url = f"https://radiosondy.info/local_storage/PREDICT/{self.sonde_number}_predict.kml"
             logger.info(f"Fetching prediction KML from: {kml_url}")
-            
-            response = session.get(kml_url)
+            response = self._session.get(kml_url, timeout=REQUEST_TIMEOUT_S)
             if response.status_code == 200:
                 logger.info("Successfully fetched prediction KML data")
                 return response.text
@@ -266,11 +262,6 @@ class SondeProcessor:
     def parse_last_seen_from_geojson(self) -> SondeData | None:
         """Parses the GeoJSON file for last seen data when the HTML table is unavailable."""
         try:
-            session = requests.Session()
-            session.headers.update({
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            })
-            
             # Try multiple URL patterns for GeoJSON
             # sonde.php pages use export/export_map.php endpoint
             geojson_urls = [
@@ -282,7 +273,7 @@ class SondeProcessor:
             data = None
             for url in geojson_urls:
                 logger.info(f"Fetching GeoJSON from: {url}")
-                response = session.get(url)
+                response = self._session.get(url, timeout=REQUEST_TIMEOUT_S)
                 if response.status_code == 200:
                     try:
                         data = response.json()
@@ -441,14 +432,14 @@ class SondeProcessor:
             
             # Last Seen waypoint
             xml_lines.append(f'  <wpt lat="{sonde_data.last_seen_coords.lat}" lon="{sonde_data.last_seen_coords.lon}">')
-            xml_lines.append(f'    <name>{self.sonde_number} Last Seen</name>')
+            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} Last Seen</name>')
             xml_lines.append(f'    <desc>Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}</desc>')
             xml_lines.append(f'    <sym>{GPX_SYMBOL_LAST_SEEN}</sym>')
             xml_lines.append('  </wpt>')
             
             # Predicted Landing waypoint
             xml_lines.append(f'  <wpt lat="{landing_point.lat}" lon="{landing_point.lon}">')
-            xml_lines.append(f'    <name>{self.sonde_number} My Predicted Landing</name>')
+            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} My Predicted Landing</name>')
             xml_lines.append(f'    <desc>Time2Ground: {time_to_ground}, GroundHeight: {ground_height}</desc>')
             xml_lines.append(f'    <sym>{GPX_SYMBOL_PREDICTED_LANDING}</sym>')
             xml_lines.append('  </wpt>')
@@ -456,9 +447,9 @@ class SondeProcessor:
             # Radiosondy coords waypoint
             if self.radiosondy_coords:
                 xml_lines.append(f'  <wpt lat="{self.radiosondy_coords.lat}" lon="{self.radiosondy_coords.lon}">')
-                xml_lines.append(f'    <name>{self.sonde_number} radiosondy Landing Point</name>')
+                xml_lines.append(f'    <name>{escape(str(self.sonde_number))} radiosondy Landing Point</name>')
                 if self.radiosondy_coords_description:
-                    xml_lines.append(f'    <desc>{self.radiosondy_coords_description}</desc>')
+                    xml_lines.append(f'    <desc>{escape(str(self.radiosondy_coords_description))}</desc>')
                 else:
                     xml_lines.append('    <desc></desc>')
                 xml_lines.append(f'    <sym>{GPX_SYMBOL_RADIOSONDY_LANDING}</sym>')
@@ -468,7 +459,12 @@ class SondeProcessor:
             xml_content = '\n'.join(xml_lines)
             
             # Write with explicit UTF-8 encoding and Unix line endings for maximum compatibility
-            with open(filename, "w", encoding="utf-8", newline="\n") as f:
+            output_path = Path(filename).resolve()
+            gpx_dir = Path("gpx").resolve()
+            if gpx_dir not in output_path.parents:
+                logger.error(f"Refusing to write GPX outside {gpx_dir}: {filename}")
+                return None
+            with open(output_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(xml_content)
             logger.info(f"Successfully created {filename}")
             return filename
