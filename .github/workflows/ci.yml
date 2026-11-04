@@ -23,13 +23,11 @@ jobs:
     - name: Create virtual environment
       run: uv venv
 
-    - name: Activate virtual environment and install dependencies
-      run: |
-        source .venv/bin/activate
-        uv pip install -e . ruff pytest pytest-asyncio
+    - name: Install dependencies
+      run: uv sync --all-extras --dev
 
     - name: Run ruff linter
       run: uv run ruff check .
 
     - name: Run tests
-      run: PYTHONPATH=$PWD uv run pytest tests/
+      run: uv run pytest tests/
