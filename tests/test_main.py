@@ -78,67 +78,43 @@ class TestSondeProcessorURLParsing(unittest.TestCase):
     def test_extract_sonde_number_d_type(self):
         """Test extracting D-series sonde number"""
         url = "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
-        processor = SondeProcessor(url, None)
+        processor = SondeProcessor(url)
         self.assertEqual(processor.sonde_number, "D20040532")
 
     def test_extract_sonde_number_x_type(self):
         """Test extracting X-series sonde number"""
         url = "https://radiosondy.info/sonde.php?sondenumber=X3432089"
-        processor = SondeProcessor(url, None)
+        processor = SondeProcessor(url)
         self.assertEqual(processor.sonde_number, "X3432089")
 
     def test_extract_sonde_number_w_type(self):
         """Test extracting W-series sonde number"""
         url = "https://radiosondy.info/sonde_archive.php?sondenumber=W2350755Z"
-        processor = SondeProcessor(url, None)
+        processor = SondeProcessor(url)
         self.assertEqual(processor.sonde_number, "W2350755Z")
 
     def test_extract_sonde_number_lowercase(self):
         """Test extracting sonde number with lowercase letters"""
         url = "https://radiosondy.info/sonde.php?sondenumber=w2350755z"
-        processor = SondeProcessor(url, None)
+        processor = SondeProcessor(url)
         self.assertEqual(processor.sonde_number, "w2350755z")
 
     def test_invalid_url_returns_none(self):
         """Test URL without sonde number"""
         url = "https://radiosondy.info/index.php"
-        processor = SondeProcessor(url, None)
+        processor = SondeProcessor(url)
         self.assertIsNone(processor.sonde_number)
 
 
 class TestCoordsParsing(unittest.TestCase):
-    """Tests for --coords argument parsing"""
-
-    def test_parse_coords_with_timestamp(self):
-        """Test parsing coordinates with timestamp"""
-        coords_str = "49.91424,9.51475 at 2026-08-11T11:53:27.125Z"
-        processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532",
-            coords_str,
-        )
-        self.assertIsNotNone(processor.radiosondy_coords)
-        self.assertAlmostEqual(processor.radiosondy_coords.lat, 49.91424)
-        self.assertAlmostEqual(processor.radiosondy_coords.lon, 9.51475)
-        self.assertEqual(
-            processor.radiosondy_coords_description, "2026-08-11T11:53:27.125Z"
-        )
+    """Tests for coordinates parsing"""
 
     def test_parse_coords_negative_values(self):
         """Test parsing coordinates with negative values"""
         coords_str = "-33.87567,152.28691 at 2026-08-16T21:40:45.375Z"
+        # Manual coords parsing removed; just verify processor initialization
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde.php?sondenumber=X3432089", coords_str
-        )
-        self.assertIsNotNone(processor.radiosondy_coords)
-        self.assertAlmostEqual(processor.radiosondy_coords.lat, -33.87567)
-        self.assertAlmostEqual(processor.radiosondy_coords.lon, 152.28691)
-
-    def test_parse_invalid_coords(self):
-        """Test invalid coordinate format"""
-        coords_str = "invalid format"
-        processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532",
-            coords_str,
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089"
         )
         self.assertIsNone(processor.radiosondy_coords)
 
@@ -149,7 +125,7 @@ class TestLandingPointCalculation(unittest.TestCase):
     def test_calculate_landing_point_basic(self):
         """Test basic landing point calculation"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords = Coordinates(lat=49.915, lon=9.5154)
 
@@ -171,7 +147,7 @@ class TestLandingPointCalculation(unittest.TestCase):
     def test_landing_point_calculation_with_zero_altitude(self):
         """Test calculation when balloon is already at ground level"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords = Coordinates(lat=49.915, lon=9.5154)
 
@@ -205,7 +181,7 @@ class TestPredictionKMLParsing(unittest.TestCase):
 </kml>"""
 
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords, timestamp = processor.parse_prediction_kml(kml_content)
 
@@ -229,7 +205,7 @@ class TestPredictionKMLParsing(unittest.TestCase):
 </kml>"""
 
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords, timestamp = processor.parse_prediction_kml(kml_content)
 
@@ -239,7 +215,16 @@ class TestPredictionKMLParsing(unittest.TestCase):
     def test_parse_prediction_empty_content(self):
         """Test parsing empty KML content"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
+        )
+        coords, timestamp = processor.parse_prediction_kml("")
+        self.assertIsNone(coords)
+        self.assertIsNone(timestamp)
+
+    def test_parse_prediction_empty_content(self):
+        """Test parsing empty KML content"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords, timestamp = processor.parse_prediction_kml("")
         self.assertIsNone(coords)
@@ -270,7 +255,7 @@ class TestHTMLParsing(unittest.TestCase):
         """
 
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
 
         with patch.object(processor, "parse_last_seen_data") as mock_parse:
@@ -295,7 +280,7 @@ class TestGPXFileGeneration(unittest.TestCase):
     def test_create_gpx_file(self):
         """Test GPX file creation"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         processor.radiosondy_coords = Coordinates(lat=49.91424, lon=9.51475)
         processor.radiosondy_coords_description = "2026-08-11T11:53:27.125Z"
@@ -322,7 +307,7 @@ class TestGPXFileGeneration(unittest.TestCase):
         """GPX output must stay inside the gpx/ directory even if the
         sonde number ever contains path characters"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde.php?sondenumber=X3432089", None
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089"
         )
         processor.sonde_number = "../../evil"
 
@@ -346,7 +331,7 @@ class TestGPXFileGeneration(unittest.TestCase):
         """Real GPX write stays well-formed XML and round-trips descriptions
         containing XML special characters"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde.php?sondenumber=X3432089", None
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089"
         )
         processor.radiosondy_coords = Coordinates(lat=50.9, lon=7.1)
         processor.radiosondy_coords_description = 'landed <near> & "here"'
@@ -389,7 +374,7 @@ class TestEnvironmentVariables(unittest.TestCase):
     def test_missing_telegram_env_vars(self):
         """Test behavior when Telegram env vars are missing"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         asyncio.run(processor.send_to_telegram("nonexistent.gpx"))
 
@@ -404,7 +389,7 @@ class TestEarthRadiusCalculation(unittest.TestCase):
     def test_landing_distance_calculation(self):
         """Test that distance calculation is reasonable"""
         processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532", None
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
         )
         coords = Coordinates(lat=0, lon=0)
 

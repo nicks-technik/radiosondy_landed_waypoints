@@ -42,18 +42,7 @@ This project provides a Python script to extract the last seen and predicted lan
     uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792
     ```
 
-    The script will generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).
-
-    You can also provide manual coordinates for a landing point using the `--coords` flag. The coordinates can be in one of two formats:
-    *   `'lat,lon'` (e.g., `'50.22794,9.40322'`)
-    *   `'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'` (e.g., `'50.22794,9.40322 at 2025-09-12T13:05:49.25Z'`)
-
-    When the second format is used, the date and time will be added as a description to the waypoint.
-
-    Example with manual coordinates:
-    ```bash
-    uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792 --coords '50.22794,9.40322 at 2025-09-12T13:05:49.25Z'
-    ```
+    The script will automatically scrape the balloon landing coordinates from the radiosondy.info website/map (via the map/GeoJSON data, with prediction KML as fallback) and generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).
 
 ## Telegram Integration
 

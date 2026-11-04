@@ -54,15 +54,13 @@ class SondeData:
 
 
 class SondeProcessor:
-    def __init__(self, url: str, coords: str | None = None):
+    def __init__(self, url: str):
         self.url = url
-        self.coords = coords
         self.sonde_number = self._extract_sonde_number(url)
         self.radiosondy_coords = None
         self.radiosondy_coords_description = None
         self._session = requests.Session()
         self._session.headers.update(HTTP_HEADERS)
-        self._parse_radiosondy_coords()
 
     def _extract_sonde_number(self, url: str) -> str | None:
         match = re.search(r"sondenumber=([A-Za-z0-9]+)", url)
@@ -70,30 +68,6 @@ class SondeProcessor:
             return match.group(1)
         logger.warning("Could not extract sonde number from URL.")
         return None
-
-    def _parse_radiosondy_coords(self):
-        if self.coords:
-            try:
-                coords_match = re.match(
-                    r"([\d.\-]+),([\d.\-]+)(\s+at\s+(.*))?", self.coords
-                )
-                if coords_match:
-                    lat_str = coords_match.group(1)
-                    lon_str = coords_match.group(2)
-                    self.radiosondy_coords = Coordinates(
-                        lat=float(lat_str), lon=float(lon_str)
-                    )
-                    if coords_match.group(4):
-                        self.radiosondy_coords_description = coords_match.group(4)
-                else:
-                    logger.warning(
-                        "Invalid format for --coords. Please use 'lat,lon' or 'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'."
-                    )
-                logger.info(f"radiosondy_coords: {self.radiosondy_coords}")
-            except ValueError:
-                logger.warning(
-                    "Invalid format for --coords. Please use 'lat,lon' or 'lat,lon at YYYY-MM-DDTHH:MM:SS.ssZ'."
-                )
 
     def fetch_website_content(self) -> str | None:
         """Fetches the HTML content of a given URL."""
@@ -108,7 +82,8 @@ class SondeProcessor:
     def fetch_prediction_kml(self) -> str | None:
         """Fetches the prediction KML file for the sonde."""
         try:
-            # Build prediction URL from radiosondy.info
+            if not self.sonde_number:
+                return None
             kml_url = f"https://radiosondy.info/local_storage/PREDICT/{self.sonde_number}_predict.kml"
             logger.info(f"Fetching prediction KML from: {kml_url}")
             response = self._session.get(kml_url, timeout=REQUEST_TIMEOUT_S)
@@ -413,6 +388,51 @@ class SondeProcessor:
 
         return sonde_data, landing_point, ground_height, time_to_ground
 
+    def fetch_radiosondy_landing_from_map(self) -> tuple[Coordinates | None, str | None]:
+        """Fetches the balloon landing coordinates from the radiosondy map/GeoJSON."""
+        if not self.sonde_number:
+            return None, None
+        try:
+            geojson_url = f"https://radiosondy.info/export/export_map.php?sonde_map=1&sondenumber={self.sonde_number}"
+            logger.info(f"Fetching map data from: {geojson_url}")
+            response = self._session.get(geojson_url, timeout=REQUEST_TIMEOUT_S)
+            if response.status_code != 200:
+                logger.warning(f"Map data returned status {response.status_code}")
+                return None, None
+            data = response.json()
+            features = data.get("features", [])
+            for feature in features:
+                geom = feature.get("geometry", {})
+                if geom.get("type") == "Point":
+                    coords = geom.get("coordinates", [])
+                    if len(coords) >= 2:
+                        lon = float(coords[0])
+                        lat = float(coords[1])
+                        props = feature.get("properties", {})
+                        popup = props.get("popupContent", "") or ""
+                        desc = None
+                        m = re.search(r'Last Report:\s*([^\<\n]+)', popup, re.IGNORECASE)
+                        if m:
+                            desc = m.group(1).strip()
+                        elif props.get("report"):
+                            desc = str(props.get("report"))
+                        logger.info(f"Found landing/last position from map: ({lat}, {lon})")
+                        return Coordinates(lat=lat, lon=lon), desc
+            for feature in features:
+                geom = feature.get("geometry", {})
+                if geom.get("type") == "LineString":
+                    coords_list = geom.get("coordinates", [])
+                    if coords_list:
+                        last = coords_list[-1]
+                        if len(last) >= 2:
+                            lon = float(last[0])
+                            lat = float(last[1])
+                            logger.info(f"Using last point from flight path: ({lat}, {lon})")
+                            return Coordinates(lat=lat, lon=lon), "last seen from map"
+        except Exception as e:
+            logger.error(f"Error fetching radiosondy landing from map: {e}")
+        return None, None
+
     def create_gpx_file(
         self,
         sonde_data: SondeData,
@@ -483,16 +503,15 @@ class SondeProcessor:
 
         try:
             bot = telegram.Bot(token=bot_token)
-            # Create a ZIP file to avoid Telegram corrupting the GPX during transfer
             zip_filename = file_path.replace(".gpx", ".zip")
             with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
-                zf.write(file_path, os.path.basename(file_path))
-            
+                zf.write(file_path, arcname=os.path.basename(file_path))
+
             logger.info(f"Sending {file_path} as ZIP to Telegram")
             with open(zip_filename, "rb") as f:
                 await bot.send_document(chat_id=chat_id, document=f)
             logger.info(f"Successfully sent {file_path} (as ZIP) to Telegram.")
-            
+
             # Clean up the ZIP file
             os.remove(zip_filename)
         except Exception as e:
@@ -504,10 +523,6 @@ def parse_arguments():
         description="Generate a GPX waypoint file from a radiosonde tracking website."
     )
     parser.add_argument("url", help="The URL of the radiosonde tracking website.")
-    parser.add_argument(
-        "--coords",
-        help="Optional coordinates in format 'lat,lon' to add as a waypoint.",
-    )
     return parser.parse_args()
 
 
@@ -516,11 +531,11 @@ async def main():
     load_dotenv()
     args = parse_arguments()
 
-    processor = SondeProcessor(args.url, args.coords)
+    processor = SondeProcessor(args.url)
     if not processor.sonde_number:
         return
 
-    # Fetch prediction data first (works for both sonde.php and sonde_archive.php pages)
+    # Fetch prediction data first (radiosondy calculated landing point)
     kml_content = processor.fetch_prediction_kml()
     if kml_content:
         pred_coords, timestamp = processor.parse_prediction_kml(kml_content)
@@ -538,10 +553,24 @@ async def main():
                 logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
         elif pred_coords:
             processor.radiosondy_coords = pred_coords
-            # Set a default description if no timestamp is available
-            # Use "Prediction" as fallback instead of empty description
             processor.radiosondy_coords_description = "radiosondy.info prediction"
             logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
+
+    # Try to get landing coordinates directly from map/GeoJSON as fallback
+    if not processor.radiosondy_coords:
+        map_coords, map_desc = processor.fetch_radiosondy_landing_from_map()
+        if map_coords:
+            processor.radiosondy_coords = map_coords
+            processor.radiosondy_coords_description = map_desc or "radiosondy.info map"
+            logger.info(f"Auto-detected coords from map: {processor.radiosondy_coords}")
+
+    # Try to get landing coordinates directly from map/GeoJSON as fallback
+    if not processor.radiosondy_coords:
+        map_coords, map_desc = processor.fetch_radiosondy_landing_from_map()
+        if map_coords:
+            processor.radiosondy_coords = map_coords
+            processor.radiosondy_coords_description = map_desc or "radiosondy.info map"
+            logger.info(f"Auto-detected coords from map: {processor.radiosondy_coords}")
 
     html_content = processor.fetch_website_content()
     if html_content:

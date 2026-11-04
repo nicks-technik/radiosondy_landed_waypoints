@@ -11,3 +11,9 @@ dependencies = [
     "python-telegram-bot>=22.3",
     "requests>=2.32.5",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+]
