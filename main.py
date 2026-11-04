@@ -254,7 +254,7 @@ class SondeProcessor:
                         data = response.json()
                         logger.info("Successfully fetched GeoJSON data")
                         break
-                    except Exception as json_err:
+                    except (ValueError, TypeError) as json_err:
                         logger.debug(f"JSON parse failed for {url}: {json_err}")
                         continue
                         
@@ -345,7 +345,7 @@ class SondeProcessor:
                             climb_rate=climb_rate,
                         )
                         
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError) as e:
             logger.error(f"Could not parse GeoJSON data: {e}")
             
         return None
@@ -429,7 +429,7 @@ class SondeProcessor:
                             lat = float(last[1])
                             logger.info(f"Using last point from flight path: ({lat}, {lon})")
                             return Coordinates(lat=lat, lon=lon), "last seen from map"
-        except Exception as e:
+        except (AttributeError, KeyError, ValueError, TypeError, OSError) as e:
             logger.error(f"Error fetching radiosondy landing from map: {e}")
         return None, None
 
@@ -508,13 +508,14 @@ class SondeProcessor:
                 zf.write(file_path, arcname=os.path.basename(file_path))
 
             logger.info(f"Sending {file_path} as ZIP to Telegram")
-            with open(zip_filename, "rb") as f:
-                await bot.send_document(chat_id=chat_id, document=f)
+            with open(zip_filename, "rb") as f:  # noqa: ASYNC230
+                data = f.read()
+            await bot.send_document(chat_id=chat_id, document=(os.path.basename(zip_filename), data))
             logger.info(f"Successfully sent {file_path} (as ZIP) to Telegram.")
 
             # Clean up the ZIP file
             os.remove(zip_filename)
-        except Exception as e:
+        except (OSError, telegram.error.TelegramError) as e:
             logger.error(f"Error sending file to Telegram: {e}")
 
 

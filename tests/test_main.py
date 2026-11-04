@@ -111,7 +111,6 @@ class TestCoordsParsing(unittest.TestCase):
 
     def test_parse_coords_negative_values(self):
         """Test parsing coordinates with negative values"""
-        coords_str = "-33.87567,152.28691 at 2026-08-16T21:40:45.375Z"
         # Manual coords parsing removed; just verify processor initialization
         processor = SondeProcessor(
             "https://radiosondy.info/sonde.php?sondenumber=X3432089"
