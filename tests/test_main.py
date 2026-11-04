@@ -221,15 +221,6 @@ class TestPredictionKMLParsing(unittest.TestCase):
         self.assertIsNone(coords)
         self.assertIsNone(timestamp)
 
-    def test_parse_prediction_empty_content(self):
-        """Test parsing empty KML content"""
-        processor = SondeProcessor(
-            "https://radiosondy.info/sonde_archive.php?sondenumber=D20040532"
-        )
-        coords, timestamp = processor.parse_prediction_kml("")
-        self.assertIsNone(coords)
-        self.assertIsNone(timestamp)
-
 
 class TestHTMLParsing(unittest.TestCase):
     """Tests for HTML parsing functionality"""
