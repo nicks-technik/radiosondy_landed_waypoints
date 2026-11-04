@@ -125,10 +125,11 @@ cython_debug/
 
 # uv
 .uv_cache
-uv.lock
 
 # Generated files
 requirements.txt
 
 /gpx/
 session_name.session
+
+.mimosa
