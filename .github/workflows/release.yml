@@ -20,15 +20,18 @@ jobs:
       with:
         python-version: '3.11'
 
+    - name: Install uv
+      run: pip install uv
+
     - name: Install dependencies for script
-      run: pip install toml
+      run: uv pip install toml
 
     - name: Get version from tag
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
     - name: Update pyproject.toml version
-      run: python old/update_version.py ${{ steps.get_version.outputs.VERSION }}
+      run: python update_version.py ${{ steps.get_version.outputs.VERSION }}
 
     - name: Commit and push version update
       run: |
