@@ -1,6 +1,8 @@
-import toml
 import sys
 from pathlib import Path
+
+import toml
+
 
 def update_pyproject_version(new_version: str):
     pyproject_path = Path(__file__).resolve().parent / "pyproject.toml"
@@ -37,7 +39,6 @@ if __name__ == "__main__":
     
     version_from_tag = sys.argv[1]
     # Remove 'v' prefix if present
-    if version_from_tag.startswith('v'):
-        version_from_tag = version_from_tag[1:]
+    version_from_tag = version_from_tag.removeprefix('v')
     
     update_pyproject_version(version_from_tag)

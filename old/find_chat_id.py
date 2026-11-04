@@ -1,6 +1,7 @@
+import argparse
 import asyncio
 import os
-import argparse
+
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 
