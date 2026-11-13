@@ -7,7 +7,8 @@ This project provides a Python script to extract the last seen and predicted lan
 *   Fetches radiosonde data from `radiosondy.info`.
 *   Parses the last seen and predicted landing coordinates, including course and altitude.
 *   Generates a GPX file with waypoints for both coordinates.
-*   The GPX file is named with the sonde number and the last seen time (e.g., `403823_240912_1200_gpx_waypoint.gpx`).
+*   Adds the nearest city (e.g. `Rechtenbach (DE)`, without the distance) to every waypoint name and description.
+*   The GPX file is named with the sonde number, the last seen time and the nearest city (e.g. `D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`).
 *   Automatically sends the generated GPX file to a Telegram chat.
 
 ## Usage
@@ -42,7 +43,7 @@ This project provides a Python script to extract the last seen and predicted lan
     uv run python main.py http://radiosondy.info/sonde_archive.php?sondenumber=W1150792
     ```
 
-    The script will automatically scrape the balloon landing coordinates from the radiosondy.info website/map (via the map/GeoJSON data, with prediction KML as fallback) and generate a GPX file in the `gpx/` directory, named using the sonde number and the last seen time (e.g., `gpx/403823_240912_1200_gpx_waypoint.gpx`).
+    The script will automatically scrape the balloon landing coordinates from the radiosondy.info website/map (via the map/GeoJSON data, with prediction KML as fallback) and generate a GPX file in the `gpx/` directory, named using the sonde number, the last seen time and the nearest city (e.g., `gpx/D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`).
 
 ## Telegram Integration
 

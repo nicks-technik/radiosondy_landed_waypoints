@@ -22,6 +22,12 @@ GPX_SYMBOL_PREDICTED_LANDING = "z-ico01"
 GPX_SYMBOL_RADIOSONDY_LANDING = "z-ico02"
 APRS_DATA_TABLE_ID = "Table7"
 REQUEST_TIMEOUT_S = 30
+# "Nearest City: Rechtenbach (DE) [5.01 km]" / "Nächste Stadt: Rechtenbach (DE) [5.01 km]"
+# The distance in brackets is intentionally not captured.
+NEAREST_CITY_PATTERN = re.compile(
+    r"(?:Nearest City|Nächste Stadt)\s*:\s*([^\"<\[\]]+)",
+    re.IGNORECASE,
+)
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -59,6 +65,7 @@ class SondeProcessor:
         self.sonde_number = self._extract_sonde_number(url)
         self.radiosondy_coords = None
         self.radiosondy_coords_description = None
+        self.nearest_city: str | None = None
         self._session = requests.Session()
         self._session.headers.update(HTTP_HEADERS)
 
@@ -68,6 +75,23 @@ class SondeProcessor:
             return match.group(1)
         logger.warning("Could not extract sonde number from URL.")
         return None
+
+    def parse_nearest_city(self, html_content: str) -> str | None:
+        """Extracts the nearest city from the page info box, without the distance.
+
+        Handles both the English ("Nearest City: ...") and German
+        ("Nächste Stadt: ...") labels, e.g. "Rechtenbach (DE)".
+        """
+        if not html_content:
+            return None
+
+        match = NEAREST_CITY_PATTERN.search(html_content)
+        if not match:
+            logger.warning("Could not find nearest city in page.")
+            return None
+
+        city = " ".join(match.group(1).replace("\xa0", " ").split())
+        return city or None
 
     def fetch_website_content(self) -> str | None:
         """Fetches the HTML content of a given URL."""
@@ -366,6 +390,10 @@ class SondeProcessor:
         except (AttributeError, IndexError, ValueError) as e:
             logger.error(f"Could not parse ground height: {e}")
 
+        self.nearest_city = self.parse_nearest_city(html_content)
+        if self.nearest_city:
+            logger.info(f"Nearest city: {self.nearest_city}")
+
         sonde_data = self.parse_last_seen_data(soup)
 
         if sonde_data:
@@ -433,6 +461,17 @@ class SondeProcessor:
             logger.error(f"Error fetching radiosondy landing from map: {e}")
         return None, None
 
+    @staticmethod
+    def _sanitize_filename_part(value: str | None) -> str | None:
+        """Turns a free-text value into a filesystem-friendly name part.
+
+        e.g. "Rechtenbach (DE)" -> "Rechtenbach_DE"
+        """
+        if not value:
+            return None
+        cleaned = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
+        return cleaned or None
+
     def create_gpx_file(
         self,
         sonde_data: SondeData,
@@ -443,35 +482,47 @@ class SondeProcessor:
         """Creates a GPX file with waypoints for the last seen and landing point."""
 
         time_str = sonde_data.last_seen_time.strftime("%y%m%d_%H%M")
+        city_slug = self._sanitize_filename_part(self.nearest_city)
+        city_part = f"_{city_slug}" if city_slug else ""
 
         try:
-            filename = f"gpx/{self.sonde_number}_{time_str}_gpx_waypoint.gpx"
+            filename = f"gpx/{self.sonde_number}_{time_str}{city_part}_gpx_waypoint.gpx"
+            city_note = (
+                f"Nearest City: {escape(self.nearest_city)}"
+                if self.nearest_city
+                else ""
+            )
+            city_desc = f", {city_note}" if city_note else ""
+            city_suffix = f" - {escape(self.nearest_city)}" if self.nearest_city else ""
             # Build GPX XML manually for maximum compatibility
             xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>']
             xml_lines.append('<gpx version="1.1" creator="gpx.py">')
             
             # Last Seen waypoint
             xml_lines.append(f'  <wpt lat="{sonde_data.last_seen_coords.lat}" lon="{sonde_data.last_seen_coords.lon}">')
-            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} Last Seen</name>')
-            xml_lines.append(f'    <desc>Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}</desc>')
+            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} Last Seen{city_suffix}</name>')
+            xml_lines.append(f'    <desc>Course: {sonde_data.course}, Speed {sonde_data.speed_mps}, Altitude: {sonde_data.altitude}, GroundHeight: {ground_height}{city_desc}</desc>')
             xml_lines.append(f'    <sym>{GPX_SYMBOL_LAST_SEEN}</sym>')
             xml_lines.append('  </wpt>')
             
             # Predicted Landing waypoint
             xml_lines.append(f'  <wpt lat="{landing_point.lat}" lon="{landing_point.lon}">')
-            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} My Predicted Landing</name>')
-            xml_lines.append(f'    <desc>Time2Ground: {time_to_ground}, GroundHeight: {ground_height}</desc>')
+            xml_lines.append(f'    <name>{escape(str(self.sonde_number))} My Predicted Landing{city_suffix}</name>')
+            xml_lines.append(f'    <desc>Time2Ground: {time_to_ground}, GroundHeight: {ground_height}{city_desc}</desc>')
             xml_lines.append(f'    <sym>{GPX_SYMBOL_PREDICTED_LANDING}</sym>')
             xml_lines.append('  </wpt>')
             
             # Radiosondy coords waypoint
             if self.radiosondy_coords:
                 xml_lines.append(f'  <wpt lat="{self.radiosondy_coords.lat}" lon="{self.radiosondy_coords.lon}">')
-                xml_lines.append(f'    <name>{escape(str(self.sonde_number))} radiosondy Landing Point</name>')
-                if self.radiosondy_coords_description:
-                    xml_lines.append(f'    <desc>{escape(str(self.radiosondy_coords_description))}</desc>')
-                else:
-                    xml_lines.append('    <desc></desc>')
+                xml_lines.append(f'    <name>{escape(str(self.sonde_number))} radiosondy Landing Point{city_suffix}</name>')
+                radiosondy_desc = (
+                    escape(str(self.radiosondy_coords_description))
+                    if self.radiosondy_coords_description
+                    else ""
+                )
+                desc_parts = [part for part in (radiosondy_desc, city_note) if part]
+                xml_lines.append(f'    <desc>{", ".join(desc_parts)}</desc>')
                 xml_lines.append(f'    <sym>{GPX_SYMBOL_RADIOSONDY_LANDING}</sym>')
                 xml_lines.append('  </wpt>')
             
@@ -501,22 +552,24 @@ class SondeProcessor:
             logger.warning("Telegram bot token or chat ID not found in .env file.")
             return
 
+        zip_filename = file_path.replace(".gpx", ".zip")
         try:
             bot = telegram.Bot(token=bot_token)
-            zip_filename = file_path.replace(".gpx", ".zip")
-            with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zf:
+            with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.write(file_path, arcname=os.path.basename(file_path))
 
             logger.info(f"Sending {file_path} as ZIP to Telegram")
             with open(zip_filename, "rb") as f:  # noqa: ASYNC230
                 data = f.read()
-            await bot.send_document(chat_id=chat_id, document=(os.path.basename(zip_filename), data))
+            document = telegram.InputFile(data, filename=os.path.basename(zip_filename))
+            await bot.send_document(chat_id=chat_id, document=document)
             logger.info(f"Successfully sent {file_path} (as ZIP) to Telegram.")
-
-            # Clean up the ZIP file
-            os.remove(zip_filename)
         except (OSError, telegram.error.TelegramError) as e:
             logger.error(f"Error sending file to Telegram: {e}")
+        finally:
+            # Clean up the ZIP file, even if sending failed
+            if os.path.exists(zip_filename):
+                os.remove(zip_filename)
 
 
 def parse_arguments():
@@ -551,11 +604,9 @@ async def main():
                     lon=float(coords_match.group(2))
                 )
                 processor.radiosondy_coords_description = coords_match.group(4)
-                logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
         elif pred_coords:
             processor.radiosondy_coords = pred_coords
             processor.radiosondy_coords_description = "radiosondy.info prediction"
-            logger.info(f"Auto-detected coords from prediction: {processor.radiosondy_coords}")
 
     # Try to get landing coordinates directly from map/GeoJSON as fallback
     if not processor.radiosondy_coords:
@@ -563,15 +614,6 @@ async def main():
         if map_coords:
             processor.radiosondy_coords = map_coords
             processor.radiosondy_coords_description = map_desc or "radiosondy.info map"
-            logger.info(f"Auto-detected coords from map: {processor.radiosondy_coords}")
-
-    # Try to get landing coordinates directly from map/GeoJSON as fallback
-    if not processor.radiosondy_coords:
-        map_coords, map_desc = processor.fetch_radiosondy_landing_from_map()
-        if map_coords:
-            processor.radiosondy_coords = map_coords
-            processor.radiosondy_coords_description = map_desc or "radiosondy.info map"
-            logger.info(f"Auto-detected coords from map: {processor.radiosondy_coords}")
 
     html_content = processor.fetch_website_content()
     if html_content:

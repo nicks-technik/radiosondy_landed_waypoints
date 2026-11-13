@@ -264,6 +264,80 @@ class TestHTMLParsing(unittest.TestCase):
             self.assertIsNotNone(result[1])
 
 
+class TestNearestCityParsing(unittest.TestCase):
+    """Tests for extracting the nearest city from the info box"""
+
+    def test_parse_nearest_city_english(self):
+        """English label with distance in brackets"""
+        html = (
+            '<h4 class="info-title"><i class="svg-house mr-5"></i> '
+            "Nearest City: Rechtenbach (DE) [5.01 km]</h4>"
+        )
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        city = processor.parse_nearest_city(html)
+        self.assertEqual(city, "Rechtenbach (DE)")
+        self.assertNotIn("km", city)
+        self.assertNotIn("[", city)
+
+    def test_parse_nearest_city_german(self):
+        """German label with distance in brackets"""
+        html = (
+            '<h4 class="info-title"><i class="svg-house mr-5"></i> '
+            "Nächste Stadt: Rechtenbach (DE) [5.01 km]</h4>"
+        )
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        self.assertEqual(processor.parse_nearest_city(html), "Rechtenbach (DE)")
+
+    def test_parse_nearest_city_without_distance(self):
+        """City without a distance suffix"""
+        html = "Nearest City: Bad Vilbel (DE)"
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        self.assertEqual(processor.parse_nearest_city(html), "Bad Vilbel (DE)")
+
+    def test_parse_nearest_city_from_meta_description(self):
+        """Nearest city inside a quoted meta tag must not include the quote"""
+        html = (
+            '<meta property="og:description" content="Launch Date: 2026-11-12 | '
+            'Status: Unknown | Nearest City: Rechtenbach (DE)"/>\n'
+            "<html></html>"
+        )
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        self.assertEqual(processor.parse_nearest_city(html), "Rechtenbach (DE)")
+
+    def test_parse_nearest_city_missing(self):
+        """Page without a nearest city entry"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        self.assertIsNone(processor.parse_nearest_city("<html></html>"))
+        self.assertIsNone(processor.parse_nearest_city(""))
+
+    def test_get_coordinates_stores_nearest_city(self):
+        """get_coordinates picks up the nearest city from the page"""
+        mock_html = """
+        <h4 class="info-title"><i class="svg-house mr-5"></i>
+            Nearest City: Rechtenbach (DE) [5.01 km]</h4>
+        <p>Ground Altitude: 287 m</p>
+        """
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+
+        with patch.object(processor, "parse_last_seen_data", return_value=None):
+            processor.get_coordinates(mock_html)
+
+        self.assertEqual(processor.nearest_city, "Rechtenbach (DE)")
+        self.assertEqual(processor._sanitize_filename_part("Rechtenbach (DE)"), "Rechtenbach_DE")
+
+
 class TestGPXFileGeneration(unittest.TestCase):
     """Tests for GPX file creation"""
 
@@ -316,6 +390,84 @@ class TestGPXFileGeneration(unittest.TestCase):
         self.assertIsNone(result)
         self.assertFalse(list(Path(".").glob("evil_*")))
         self.assertFalse(list(Path("..").glob("evil_*")))
+
+    def test_create_gpx_file_includes_nearest_city(self):
+        """Nearest city (without distance) ends up in filename and all descs"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde_archive.php?sondenumber=D23031952"
+        )
+        processor.nearest_city = "Rechtenbach (DE)"
+        processor.radiosondy_coords = Coordinates(lat=49.94169, lon=9.47244)
+        processor.radiosondy_coords_description = "2026-11-12T11:11:03.25Z"
+
+        sonde_data = SondeData(
+            last_seen_coords=Coordinates(lat=49.9451, lon=9.4705),
+            last_seen_time=datetime(2026, 11, 12, 11, 9, 0, tzinfo=UTC),
+            course=180.0,
+            altitude=648.0,
+            speed_mps=2.5,
+            climb_rate=-3.0,
+        )
+        landing_point = Coordinates(lat=49.94239, lon=9.4705)
+
+        with tempfile.TemporaryDirectory() as tmpdir, chdir(tmpdir):
+            Path("gpx").mkdir()
+            filename = processor.create_gpx_file(
+                sonde_data, landing_point, 287.0, 120.33
+            )
+
+            self.assertIsNotNone(filename)
+            self.assertEqual(
+                filename,
+                "gpx/D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx",
+            )
+
+            tree = ET.parse(filename)
+            waypoints = tree.getroot().findall("wpt")
+            names = [wpt.findtext("name") for wpt in waypoints]
+            descs = [wpt.findtext("desc") for wpt in waypoints]
+            self.assertEqual(len(names), 3)
+            self.assertEqual(
+                names,
+                [
+                    "D23031952 Last Seen - Rechtenbach (DE)",
+                    "D23031952 My Predicted Landing - Rechtenbach (DE)",
+                    "D23031952 radiosondy Landing Point - Rechtenbach (DE)",
+                ],
+            )
+            for desc in descs:
+                self.assertIn("Nearest City: Rechtenbach (DE)", desc)
+                self.assertNotIn("km", desc)
+                self.assertNotIn("[", desc)
+
+    def test_create_gpx_file_without_nearest_city(self):
+        """No nearest city -> unchanged filename and descriptions"""
+        processor = SondeProcessor(
+            "https://radiosondy.info/sonde.php?sondenumber=X3432089"
+        )
+        processor.radiosondy_coords = Coordinates(lat=50.9, lon=7.1)
+
+        sonde_data = SondeData(
+            last_seen_coords=Coordinates(lat=51.0, lon=7.0),
+            last_seen_time=datetime(2026, 9, 27, 12, 0, 0, tzinfo=UTC),
+            course=180.0,
+            altitude=100.0,
+            speed_mps=5.0,
+            climb_rate=-5.0,
+        )
+        landing_point = Coordinates(lat=50.95, lon=7.05)
+
+        with tempfile.TemporaryDirectory() as tmpdir, chdir(tmpdir):
+            Path("gpx").mkdir()
+            filename = processor.create_gpx_file(
+                sonde_data, landing_point, 100.0, 20.0
+            )
+
+            self.assertEqual(
+                filename, "gpx/X3432089_260927_1200_gpx_waypoint.gpx"
+            )
+            content = Path(filename).read_text(encoding="utf-8")
+            self.assertNotIn("Nearest City", content)
 
     def test_create_gpx_file_well_formed_xml_with_special_characters(self):
         """Real GPX write stays well-formed XML and round-trips descriptions
