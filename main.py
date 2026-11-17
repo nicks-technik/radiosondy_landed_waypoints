@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+import sys
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -543,14 +544,14 @@ class SondeProcessor:
             logger.error(f"Error writing GPX file: {e}")
             return None
 
-    async def send_to_telegram(self, file_path: str):
-        """Sends the GPX file to a Telegram chat."""
+    async def send_to_telegram(self, file_path: str) -> bool:
+        """Sends the GPX file to a Telegram chat. Returns True on success."""
         bot_token = os.getenv("ENV_TELEGRAM_BOT_TOKEN")
         chat_id = os.getenv("ENV_TELEGRAM_CHAT_ID")
 
         if not bot_token or not chat_id:
             logger.warning("Telegram bot token or chat ID not found in .env file.")
-            return
+            return False
 
         zip_filename = file_path.replace(".gpx", ".zip")
         try:
@@ -564,8 +565,10 @@ class SondeProcessor:
             document = telegram.InputFile(data, filename=os.path.basename(zip_filename))
             await bot.send_document(chat_id=chat_id, document=document)
             logger.info(f"Successfully sent {file_path} (as ZIP) to Telegram.")
+            return True
         except (OSError, telegram.error.TelegramError) as e:
             logger.error(f"Error sending file to Telegram: {e}")
+            return False
         finally:
             # Clean up the ZIP file, even if sending failed
             if os.path.exists(zip_filename):
@@ -580,14 +583,14 @@ def parse_arguments():
     return parser.parse_args()
 
 
-async def main():
-    """Main function to orchestrate the script execution."""
+async def main() -> int:
+    """Main function to orchestrate the script execution. Returns a exit code."""
     load_dotenv()
     args = parse_arguments()
 
     processor = SondeProcessor(args.url)
     if not processor.sonde_number:
-        return
+        return 1
 
     # Fetch prediction data first (radiosondy calculated landing point)
     kml_content = processor.fetch_prediction_kml()
@@ -625,8 +628,14 @@ async def main():
                 sonde_data, landing_point, ground_height, time_to_ground
             )
             if filename:
-                await processor.send_to_telegram(filename)
+                return 0 if await processor.send_to_telegram(filename) else 1
+            logger.error("No GPX file was created.")
+            return 1
+        logger.error("Could not extract sonde coordinates from the page.")
+        return 1
+    logger.error("Could not fetch the radiosonde page.")
+    return 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

@@ -8,10 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `check_tracker_mail.py`: hourly check for new `tracker@radiosondy.info` mail; runs `main.py`
+  with the link from the mail's "Details" button so the GPX ZIP reaches Telegram.
 - `check_status_changes.py`: daily watch of the "Status Changes" table on each tracked
   sonde's radiosondy.info archive page; new rows are mailed to `radiosonde@hornick.de`.
 - Tracked sondes are taken from `tracker@radiosondy.info` messages in the Gmail inbox.
-- Unit tests for subject parsing, table parsing and notification content.
+- Unit tests for subject parsing, table parsing, notification and mail-link handling.
+
+### Changed
+- `main.py` now exits non-zero when no GPX was created or the Telegram delivery failed
+  (previously it always exited 0), so the hourly handler can detect failures.
 
 ## [1.1.0] - 2026-11-13
 

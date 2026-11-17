@@ -45,6 +45,31 @@ This project provides a Python script to extract the last seen and predicted lan
 
     The script will automatically scrape the balloon landing coordinates from the radiosondy.info website/map (via the map/GeoJSON data, with prediction KML as fallback) and generate a GPX file in the `gpx/` directory, named using the sonde number, the last seen time and the nearest city (e.g., `gpx/D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`).
 
+## Hourly Tracker-Mail Automation
+
+`check_tracker_mail.py` checks the Gmail inbox once an hour for new messages from
+`tracker@radiosondy.info` and, for each one not handled before, runs `main.py` with the link from
+the mail's **Details** button. `main.py` then generates the GPX file and sends it as a ZIP to
+Telegram.
+
+*   **Deduplication:** by the message `Message-ID`; a mail is handled at most once.
+*   **Retry:** a mail whose script run fails is left unhandled, so the next hourly run retries it.
+*   **State:** `~/.hermes/logs/radiosondy_mail_state.json` (handled message ids).
+*   **Mailbox access:** IMAP read-only, same app password as the daily watch.
+*   **Exit code:** `main.py` exits `0` only when the ZIP was actually delivered to Telegram,
+  `1` otherwise — the handler relies on that and alerts on failure.
+*   **Schedule:** hourly from the system crontab, `flock`-guarded:
+
+    ```cron
+    17 * * * * /usr/bin/flock -n /tmp/radiosondy_mail.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_tracker_mail.py' >> /home/hermes/.hermes/logs/radiosondy-mail.log 2>&1
+    ```
+
+Manual run (add `--dry-run` to skip running the GPX script):
+
+```bash
+.venv/bin/python check_tracker_mail.py
+```
+
 ## Daily Status-Change Watch (e-mail)
 
 `check_status_changes.py` watches the radiosondes that `tracker@radiosondy.info` announces by
