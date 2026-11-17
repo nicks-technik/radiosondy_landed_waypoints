@@ -45,6 +45,35 @@ This project provides a Python script to extract the last seen and predicted lan
 
     The script will automatically scrape the balloon landing coordinates from the radiosondy.info website/map (via the map/GeoJSON data, with prediction KML as fallback) and generate a GPX file in the `gpx/` directory, named using the sonde number, the last seen time and the nearest city (e.g., `gpx/D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`).
 
+## Daily Status-Change Watch (e-mail)
+
+`check_status_changes.py` watches the radiosondes that `tracker@radiosondy.info` announces by
+e-mail and reports new entries in a sonde's **Status Changes** section.
+
+*   **Source of sonde numbers:** every message from `tracker@radiosondy.info` in the Gmail inbox
+    (`nick2faktor@gmail.com`), sonde number taken from the subject line.
+*   **Check:** the `Status Changes` table on `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>`.
+*   **Trigger:** a table row that was not there on the previous run.
+*   **Notification:** one e-mail per sonde to `radiosonde@hornick.de`, subject
+    `[Radiosondy] <ID> Status Änderung: <STATUS>`, body contains the link, the sonde number and
+    the new rows.
+*   **Schedule:** daily at 11:35 (Europe/Berlin) from the system crontab, `flock`-guarded:
+
+    ```cron
+    35 11 * * * /usr/bin/flock -n /tmp/radiosondy_status.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_status_changes.py' >> /home/hermes/.hermes/logs/radiosondy-status.log 2>&1
+    ```
+
+*   **State:** `~/.hermes/logs/radiosondy_status_state.json` (already reported rows per sonde).
+*   **Mailbox access:** IMAP read-only; the app password lives in
+    `~/.hermes/secrets/gmail_app_password` and is never written to the config or the repo.
+*   **Silent when nothing changes**; a run failure sends one ❌ to the Hermes News Group.
+
+Manual run (add `--dry-run` to skip sending mail):
+
+```bash
+.venv/bin/python check_status_changes.py
+```
+
 ## Telegram Integration
 
 This script can automatically send the generated GPX file (zipped) to a Telegram chat. To enable this feature, you only need a Telegram bot token and chat ID.

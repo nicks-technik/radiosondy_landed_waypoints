@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Daily radiosondy.info "Status Changes" watcher.
+
+Watches the radiosondes that radiosondy.info's tracker (tracker@radiosondy.info)
+announces by email, checks each sonde's "Status Changes" table on its archive
+page once a day, and mails new entries to radiosonde@hornick.de.
+
+Read-only w.r.t. the mailbox: the inbox is only searched, never modified.
+State (which table rows were already reported) lives outside the git checkout,
+in ~/.hermes/logs/radiosondy_status_state.json.
+
+Usage:
+    python check_status_changes.py [--dry-run] [--quiet]
+"""
+
+from __future__ import annotations
+
+import argparse
+import imaplib
+import json
+import logging
+import os
+import re
+import smtplib
+import sys
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+from pathlib import Path
+
+import requests
+from bs4 import BeautifulSoup
+
+# --- Configuration -----------------------------------------------------------
+GMAIL_ADDRESS = os.environ.get("RADIOSONDY_GMAIL_ADDRESS", "nick2faktor@gmail.com")
+APP_PASSWORD_FILE = Path(
+    os.environ.get("RADIOSONDY_APP_PASSWORD_FILE", "/home/hermes/.hermes/secrets/gmail_app_password")
+)
+RECIPIENT = os.environ.get("RADIOSONDY_NOTIFY_ADDRESS", "radiosonde@hornick.de")
+TRACKER_SENDER = "tracker@radiosondy.info"
+SONDE_PAGE_URL = "https://radiosondy.info/sonde_archive.php?sondenumber={sonde}"
+STATUS_TABLE_ID = "Table6"
+STATE_FILE = Path(
+    os.environ.get("RADIOSONDY_STATE_FILE", "/home/hermes/.hermes/logs/radiosondy_status_state.json")
+)
+ENV_FILE = Path("/home/hermes/.hermes/.env")
+
+HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+REQUEST_TIMEOUT_S = 30
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 465
+
+logger = logging.getLogger("radiosondy-status")
+
+SONDE_TOKEN_RE = re.compile(r"\b[A-Z]{1,3}[0-9][A-Z0-9]{4,9}\b")
+
+
+# --- Helpers -----------------------------------------------------------------
+def load_state() -> dict:
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("State file unreadable, starting fresh: %s", STATE_FILE)
+    return {"sondes": {}}
+
+
+def save_state(state: dict) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(STATE_FILE)
+
+
+def read_app_password() -> str:
+    return APP_PASSWORD_FILE.read_text(encoding="utf-8").strip()
+
+
+def norm(text: str) -> str:
+    return " ".join(text.replace("\xa0", " ").split())
+
+
+# ---Mailbox: find announced sondes ------------------------------------------
+def find_announced_sondes(password: str) -> list[str]:
+    """Search the inbox for tracker@radiosondy.info mail and return sonde numbers."""
+    found: list[str] = []
+    try:
+        with imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30) as imap:
+            imap.login(GMAIL_ADDRESS, password)
+            imap.select("INBOX")
+            typ, data = imap.search(None, "FROM", TRACKER_SENDER)
+            if typ != "OK" or not data or not data[0]:
+                return found
+            for msg_id in data[0].split():
+                typ, msg_data = imap.fetch(msg_id, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+                if typ != "OK" or not msg_data:
+                    continue
+                part = msg_data[0]
+                payload = part[1] if isinstance(part, tuple) and len(part) > 1 else b""
+                if not isinstance(payload, (bytes, bytearray)):
+                    continue
+                raw = payload.decode("utf-8", errors="replace")
+                subject = raw.split("Subject:", 1)[-1].strip()
+                sonde = sonde_from_subject(subject)
+                if sonde:
+                    found.append(sonde)
+    except (imaplib.IMAP4.error, OSError) as exc:
+        logger.error("Mailbox search failed: %s", exc)
+        raise
+    return list(dict.fromkeys(found))
+
+
+def sonde_from_subject(subject: str) -> str | None:
+    """'[INFO] Idar-Oberstein (DE) D23029639 2026-11-17' -> 'D23029639'."""
+    tokens = subject.split()
+    for index, token in enumerate(tokens):
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", token) and index > 0:
+            candidate = tokens[index - 1]
+            if SONDE_TOKEN_RE.fullmatch(candidate):
+                return candidate
+    match = SONDE_TOKEN_RE.search(subject)
+    return match.group(0) if match else None
+
+
+# --- Website: parse the Status Changes table ---------------------------------
+def parse_status_rows(html: str) -> list[list[str]]:
+    """Parse the 'Status Changes' table (Table6) of a sonde archive page."""
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table", id=STATUS_TABLE_ID)
+    if table is None:
+        logger.warning("status table #%s not found", STATUS_TABLE_ID)
+        return []
+    rows: list[list[str]] = []
+    body = table.find("tbody")
+    for tr in (body or table).find_all("tr"):
+        cells = [norm(td.get_text(" ")) for td in tr.find_all(["td", "th"])]
+        if not cells or cells == [""]:
+            continue
+        if cells[0].lower() == "launch site":
+            continue  # header row
+        rows.append(cells)
+    return rows
+
+
+def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str]]:
+    url = SONDE_PAGE_URL.format(sonde=sonde)
+    response = session.get(url, timeout=REQUEST_TIMEOUT_S)
+    response.raise_for_status()
+    return parse_status_rows(response.text)
+
+
+# --- Notification ------------------------------------------------------------
+def build_message(sonde: str, new_rows: list[list[str]]) -> EmailMessage:
+    url = SONDE_PAGE_URL.format(sonde=sonde)
+    statuses = [row[4] if len(row) > 4 else "?" for row in new_rows]
+    subject = f"[Radiosondy] {sonde} Status Änderung: {', '.join(statuses)}"
+
+    lines = [
+        f"Radiosonde: {sonde}",
+        f"Link: {url}",
+        "",
+        "Neue Einträge im Abschnitt 'Status Änderungen':",
+        "",
+    ]
+    for row in new_rows:
+        lines.append("  " + " | ".join(row))
+    lines += [
+        "",
+        "Details bitte auf der obigen Seite prüfen.",
+        "",
+        "-- via radiosondy-status (Hermes)",
+    ]
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = RECIPIENT
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="gmail.com")
+    msg.set_content("\n".join(lines), charset="utf-8")
+    return msg
+
+
+def send_message(msg: EmailMessage, password: str) -> None:
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.login(GMAIL_ADDRESS, password)
+        smtp.send_message(msg)
+
+
+def telegram_alert(text: str) -> None:
+    """One ❌ to the News Group when the run itself fails."""
+    if not ENV_FILE.exists():
+        return
+    env = {}
+    for line in ENV_FILE.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            env[key.strip()] = value.strip().strip('"')
+    token = env.get("NEWS_TELEGRAM_BOT_TOKEN", "")
+    chat_id = env.get("NEWS_TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+    except requests.exceptions.RequestException as exc:
+        logger.error("Telegram alert failed: %s", exc)
+
+
+# --- Main --------------------------------------------------------------------
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true", help="do not send mail")
+    parser.add_argument("--quiet", action="store_true", help="suppress change output")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    state = load_state()
+    password = read_app_password()
+    session = requests.Session()
+    session.headers.update(HTTP_HEADERS)
+
+    announced = find_announced_sondes(password)
+    for sonde in announced:
+        state["sondes"].setdefault(sonde, {"rows": []})
+
+    notified = 0
+    for sonde in sorted(state["sondes"]):
+        try:
+            rows = fetch_status_changes(sonde, session)
+        except requests.exceptions.RequestException as exc:
+            logger.error("%s: fetch failed: %s", sonde, exc)
+            continue
+
+        known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
+        new_rows = [r for r in rows if tuple(r) not in known]
+
+        if not new_rows:
+            continue
+
+        state["sondes"][sonde]["rows"] = rows
+        if args.dry_run:
+            logger.info("%s: %d new row(s) (dry run)", sonde, len(new_rows))
+            continue
+
+        try:
+            send_message(build_message(sonde, new_rows), password)
+        except (smtplib.SMTPException, OSError) as exc:
+            logger.error("%s: sending failed: %s", sonde, exc)
+            telegram_alert(f"❌ radiosondy-status: {sonde} notification failed: {exc}")
+            continue
+
+        notified += 1
+        if not args.quiet:
+            print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
+
+    save_state(state)
+    logger.info("run finished, %d notification(s) sent", notified)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
