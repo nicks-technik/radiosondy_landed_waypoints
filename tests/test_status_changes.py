@@ -2,6 +2,8 @@
 
 from check_status_changes import (
     build_message,
+    format_landing_time,
+    parse_nearest_city,
     parse_status_rows,
     sonde_from_subject,
 )
@@ -85,3 +87,47 @@ def test_build_message_contains_link_and_sonde():
     assert "https://radiosondy.info/sonde_archive.php?sondenumber=D23031993" in body
     assert "D23031993" in body
     assert "FOUND" in body
+
+
+def test_build_message_lists_all_sondes():
+    overview = [
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
+        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC"),
+        ("D23032007", None, None),
+    ]
+    body = build_message("D23029639", parse_status_rows(TABLE_HTML), overview).get_content()
+    assert "Alle überwachten Sonden (3):" in body
+    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
+    assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC" in body
+    assert "D23032007 | - | Landung: -" in body
+
+
+def test_parse_nearest_city_english():
+    html = '<h4 class="info-title">Nearest City: Rechtenbach (DE) [5.01 km]</h4>'
+    assert parse_nearest_city(html) == "Rechtenbach (DE)"
+
+
+def test_parse_nearest_city_german():
+    html = "<h4>Nächste Stadt: Waldaschaff (DE) [1.20 km]</h4>"
+    assert parse_nearest_city(html) == "Waldaschaff (DE)"
+
+
+def test_parse_nearest_city_ignores_meta_description():
+    html = (
+        '<meta name="description" content="Start Date: 2026-11-17 | Status: Unknown | '
+        'Nearest City: Schönau (DE)"/>\n'
+        "<h4>Nearest City: Schönau (DE) [2.01 km]</h4>"
+    )
+    assert parse_nearest_city(html) == "Schönau (DE)"
+
+
+def test_parse_nearest_city_missing():
+    assert parse_nearest_city("<html><body>nothing</body></html>") is None
+
+
+def test_format_landing_time():
+    assert format_landing_time("2026-11-17T13:15:13.375Z") == "2026-11-17 13:15 UTC"
+
+
+def test_format_landing_time_invalid():
+    assert format_landing_time("not-a-date") == "not-a-date"

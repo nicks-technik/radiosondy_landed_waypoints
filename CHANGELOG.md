@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the link from the mail's "Details" button so the GPX ZIP reaches Telegram.
 - `check_status_changes.py`: daily watch of the "Status Changes" table on each tracked
   sonde's radiosondy.info archive page; new rows are mailed to `radiosonde@hornick.de`.
+  Every notification also lists all watched sondes with nearest city and predicted landing time.
+- The sonde archive page is fetched with a short retry so a transient failure does not
+  silently produce an empty status list.
 - Tracked sondes are taken from `tracker@radiosondy.info` messages in the Gmail inbox.
 - Unit tests for subject parsing, table parsing, notification and mail-link handling.
 

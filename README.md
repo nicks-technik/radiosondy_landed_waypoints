@@ -82,6 +82,9 @@ e-mail and reports new entries in a sonde's **Status Changes** section.
 *   **Notification:** one e-mail per sonde to `radiosonde@hornick.de`, subject
     `[Radiosondy] <ID> Status Änderung: <STATUS>`, body contains the link, the sonde number and
     the new rows.
+*   **Overview:** every notification also lists all watched sondes with their nearest city and
+    predicted landing time, e.g. `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC`.
+    Sondes without data yet show `-`.
 *   **Schedule:** daily at 11:35 (Europe/Berlin) from the system crontab, `flock`-guarded:
 
     ```cron

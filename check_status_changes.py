@@ -23,6 +23,8 @@ import os
 import re
 import smtplib
 import sys
+import time
+from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
@@ -38,6 +40,7 @@ APP_PASSWORD_FILE = Path(
 RECIPIENT = os.environ.get("RADIOSONDY_NOTIFY_ADDRESS", "radiosonde@hornick.de")
 TRACKER_SENDER = "tracker@radiosondy.info"
 SONDE_PAGE_URL = "https://radiosondy.info/sonde_archive.php?sondenumber={sonde}"
+PREDICT_KML_URL = "https://radiosondy.info/local_storage/PREDICT/{sonde}_predict.kml"
 STATUS_TABLE_ID = "Table6"
 STATE_FILE = Path(
     os.environ.get("RADIOSONDY_STATE_FILE", "/home/hermes/.hermes/logs/radiosondy_status_state.json")
@@ -59,6 +62,10 @@ SMTP_PORT = 465
 logger = logging.getLogger("radiosondy-status")
 
 SONDE_TOKEN_RE = re.compile(r"\b[A-Z]{1,3}[0-9][A-Z0-9]{4,9}\b")
+NEAREST_CITY_RE = re.compile(r"(?:Nearest City|Nächste Stadt)\s*:\s*([^<\"\[\]]+)", re.IGNORECASE)
+LANDING_TIME_RE = re.compile(
+    r"Balloon landing at [^<]*?at\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z)", re.IGNORECASE
+)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -148,15 +155,61 @@ def parse_status_rows(html: str) -> list[list[str]]:
     return rows
 
 
-def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str]]:
+def fetch_sonde_html(sonde: str, session: requests.Session, attempts: int = 3) -> str:
     url = SONDE_PAGE_URL.format(sonde=sonde)
-    response = session.get(url, timeout=REQUEST_TIMEOUT_S)
-    response.raise_for_status()
-    return parse_status_rows(response.text)
+    last_error: requests.exceptions.RequestException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = session.get(url, timeout=REQUEST_TIMEOUT_S)
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            logger.warning("%s: fetch attempt %d/%d failed: %s", sonde, attempt, attempts, exc)
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+    raise last_error  # type: ignore[misc]
+
+
+def parse_nearest_city(html: str) -> str | None:
+    """'Nearest City: Schönau (DE) [2.01 km]' -> 'Schönau (DE)'."""
+    match = NEAREST_CITY_RE.search(html)
+    if not match:
+        return None
+    return norm(match.group(1)) or None
+
+
+def format_landing_time(raw: str) -> str:
+    try:
+        moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def fetch_landing_time(sonde: str, session: requests.Session) -> str | None:
+    """Predicted landing time from radiosondy.info's prediction KML."""
+    try:
+        response = session.get(PREDICT_KML_URL.format(sonde=sonde), timeout=REQUEST_TIMEOUT_S)
+    except requests.exceptions.RequestException as exc:
+        logger.warning("%s: prediction KML fetch failed: %s", sonde, exc)
+        return None
+    if response.status_code != 200:
+        return None
+    match = LANDING_TIME_RE.search(response.text)
+    return format_landing_time(match.group(1)) if match else None
+
+
+def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str]]:
+    return parse_status_rows(fetch_sonde_html(sonde, session))
 
 
 # --- Notification ------------------------------------------------------------
-def build_message(sonde: str, new_rows: list[list[str]]) -> EmailMessage:
+def build_message(
+    sonde: str,
+    new_rows: list[list[str]],
+    overview: list[tuple[str, str | None, str | None]] | None = None,
+) -> EmailMessage:
     url = SONDE_PAGE_URL.format(sonde=sonde)
     statuses = [row[4] if len(row) > 4 else "?" for row in new_rows]
     subject = f"[Radiosondy] {sonde} Status Änderung: {', '.join(statuses)}"
@@ -170,6 +223,18 @@ def build_message(sonde: str, new_rows: list[list[str]]) -> EmailMessage:
     ]
     for row in new_rows:
         lines.append("  " + " | ".join(row))
+
+    if overview:
+        lines += [
+            "",
+            f"Alle überwachten Sonden ({len(overview)}):",
+            "",
+        ]
+        for watched_sonde, city, landing in overview:
+            lines.append(
+                f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'}"
+            )
+
     lines += [
         "",
         "Details bitte auf der obigen Seite prüfen.",
@@ -239,12 +304,16 @@ def main() -> int:
         state["sondes"].setdefault(sonde, {"rows": []})
 
     notified = 0
+    cities: dict[str, str | None] = {}
     for sonde in sorted(state["sondes"]):
         try:
-            rows = fetch_status_changes(sonde, session)
+            html = fetch_sonde_html(sonde, session)
         except requests.exceptions.RequestException as exc:
             logger.error("%s: fetch failed: %s", sonde, exc)
             continue
+
+        cities[sonde] = parse_nearest_city(html)
+        rows = parse_status_rows(html)
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
         new_rows = [r for r in rows if tuple(r) not in known]
@@ -253,12 +322,21 @@ def main() -> int:
             continue
 
         state["sondes"][sonde]["rows"] = rows
+
+        overview = [
+            (watched, cities.get(watched), fetch_landing_time(watched, session))
+            for watched in sorted(state["sondes"])
+        ]
+
         if args.dry_run:
-            logger.info("%s: %d new row(s) (dry run)", sonde, len(new_rows))
+            summary = ", ".join(
+                f"{watched}={city or '-'}/{landing or '-'}" for watched, city, landing in overview
+            )
+            logger.info("%s: %d new row(s) (dry run); %s", sonde, len(new_rows), summary)
             continue
 
         try:
-            send_message(build_message(sonde, new_rows), password)
+            send_message(build_message(sonde, new_rows, overview), password)
         except (smtplib.SMTPException, OSError) as exc:
             logger.error("%s: sending failed: %s", sonde, exc)
             telegram_alert(f"❌ radiosondy-status: {sonde} notification failed: {exc}")
@@ -268,7 +346,8 @@ def main() -> int:
         if not args.quiet:
             print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
 
-    save_state(state)
+    if not args.dry_run:
+        save_state(state)
     logger.info("run finished, %d notification(s) sent", notified)
     return 0
 
