@@ -43,16 +43,10 @@ TRACKER_SENDER = "tracker@radiosondy.info"
 SONDE_PAGE_URL = "https://radiosondy.info/sonde_archive.php?sondenumber={sonde}"
 PREDICT_KML_URL = "https://radiosondy.info/local_storage/PREDICT/{sonde}_predict.kml"
 STATUS_TABLE_ID = "Table6"
-OPEN_ALL_URL = os.environ.get("RADIOSONDY_OPEN_ALL_URL", "http://10.53.164.194:12346/")
 STATE_FILE = Path(
     os.environ.get("RADIOSONDY_STATE_FILE", "/home/hermes/.hermes/logs/radiosondy_status_state.json")
 )
 ENV_FILE = Path("/home/hermes/.hermes/.env")
-
-
-def open_all_url(sondes: list[str]) -> str:
-    """Link that opens every sonde in its own tab (see radiosondy_web.py)."""
-    return f"{OPEN_ALL_URL}?sondes={','.join(sondes)}"
 
 HTTP_HEADERS = {
     "User-Agent": (
@@ -243,18 +237,13 @@ def build_message(
     html_parts.append("</table>")
 
     if overview:
-        link = open_all_url([sonde for sonde, _, _ in overview])
         lines += [
             "",
-            f"Alle überwachten Sonden ({len(overview)}) - alle Tabs öffnen: {link}",
+            f"Alle überwachten Sonden ({len(overview)}):",
             "",
         ]
-        open_all_link = (
-            f'<p><b><a href="{link}">Alle überwachten Sonden ({len(overview)})'
-            " - alle Tabs öffnen</a></b></p>"
-        )
         html_parts += [
-            open_all_link,
+            f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
             '<table border="0" cellpadding="4" cellspacing="0">',
             "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
         ]
