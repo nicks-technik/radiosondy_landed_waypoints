@@ -17,9 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its
   radiosondy.info archive page.
-- `radiosondy_web.py` (systemd user service `radiosondy-web.service`, port 12346): the count
-  line in the mail links here with the sonde numbers in the query string; the opener opens all
-  of them in tabs and then becomes the first sonde itself, so no extra page stays open.
 - Tracked sondes are taken from `tracker@radiosondy.info` messages in the Gmail inbox.
 - Unit tests for subject parsing, table parsing, notification and mail-link handling.
 
