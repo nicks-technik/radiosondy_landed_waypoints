@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Daily radiosondy.info "Status Changes" watcher.
+"""radiosondy.info update watcher.
 
 Watches the radiosondes that radiosondy.info's tracker (tracker@radiosondy.info)
-announces by email, checks each sonde's "Status Changes" table on its archive
-page once a day, and mails new entries to radiosonde@hornick.de.
+announces by email and mails an update to radiosonde@hornick.de whenever
+something changed: a sonde is announced for the first time, or a row appears in
+a sonde's "Status Changes" table on its archive page. Runs silently when there
+is nothing new.
 
 Read-only w.r.t. the mailbox: the inbox is only searched, never modified.
-State (which table rows were already reported) lives outside the git checkout,
-in ~/.hermes/logs/radiosondy_status_state.json.
+State (already announced mails, already reported table rows) lives outside the
+git checkout, in ~/.hermes/logs/radiosondy_status_state.json.
 
 Usage:
     python check_status_changes.py [--dry-run] [--quiet]
@@ -76,7 +78,7 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("State file unreadable, starting fresh: %s", STATE_FILE)
-    return {"sondes": {}}
+    return {"sondes": {}, "announced": []}
 
 
 def save_state(state: dict) -> None:
@@ -95,9 +97,9 @@ def norm(text: str) -> str:
 
 
 # ---Mailbox: find announced sondes ------------------------------------------
-def find_announced_sondes(password: str) -> list[str]:
-    """Search the inbox for tracker@radiosondy.info mail and return sonde numbers."""
-    found: list[str] = []
+def find_announced_mails(password: str) -> list[tuple[str, str]]:
+    """(sonde, message_id) for every tracker mail in the inbox."""
+    found: list[tuple[str, str]] = []
     try:
         with imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30) as imap:
             imap.login(GMAIL_ADDRESS, password)
@@ -106,7 +108,7 @@ def find_announced_sondes(password: str) -> list[str]:
             if typ != "OK" or not data or not data[0]:
                 return found
             for msg_id in data[0].split():
-                typ, msg_data = imap.fetch(msg_id, "(BODY.PEEK[HEADER.FIELDS (SUBJECT)])")
+                typ, msg_data = imap.fetch(msg_id, "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID)])")
                 if typ != "OK" or not msg_data:
                     continue
                 part = msg_data[0]
@@ -114,14 +116,26 @@ def find_announced_sondes(password: str) -> list[str]:
                 if not isinstance(payload, (bytes, bytearray)):
                     continue
                 raw = payload.decode("utf-8", errors="replace")
-                subject = raw.split("Subject:", 1)[-1].strip()
+                subject = raw.split("Subject:", 1)[-1].split("\r\n", 1)[0].strip()
+                message_id = ""
+                for line in raw.splitlines():
+                    if line.lower().startswith("message-id:"):
+                        message_id = line.split(":", 1)[1].strip().strip("<>")
+                        break
                 sonde = sonde_from_subject(subject)
-                if sonde:
-                    found.append(sonde)
+                if sonde and message_id:
+                    found.append((sonde, message_id))
     except (imaplib.IMAP4.error, OSError) as exc:
         logger.error("Mailbox search failed: %s", exc)
         raise
     return list(dict.fromkeys(found))
+
+
+def fresh_announcements(
+    announced: list[tuple[str, str]], recorded: set[str]
+) -> dict[str, str]:
+    """sonde -> message_id for tracker mails that were not announced yet."""
+    return {sonde: msg_id for sonde, msg_id in announced if msg_id not in recorded}
 
 
 def sonde_from_subject(subject: str) -> str | None:
@@ -206,6 +220,51 @@ def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str
 
 
 # --- Notification ------------------------------------------------------------
+def _overview_section(
+    overview: list[tuple[str, str | None, str | None]],
+) -> tuple[list[str], list[str]]:
+    """The 'all watched sondes' table, shared by both notification types."""
+    lines = ["", f"Alle überwachten Sonden ({len(overview)}):", ""]
+    html_parts = [
+        f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
+        '<table border="0" cellpadding="4" cellspacing="0">',
+        "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
+    ]
+    for watched_sonde, city, landing in overview:
+        watched_url = SONDE_PAGE_URL.format(sonde=watched_sonde)
+        lines.append(f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'} | {watched_url}")
+        html_parts.append(
+            "<tr>"
+            f'<td><a href="{watched_url}">{watched_sonde}</a></td>'
+            f"<td>{escape(city or '-')}</td>"
+            f"<td>{escape(landing or '-')}</td>"
+            "</tr>"
+        )
+    html_parts.append("</table>")
+    return lines, html_parts
+
+
+def _finish_message(subject: str, lines: list[str], html_parts: list[str]) -> EmailMessage:
+    lines += [
+        "",
+        "Details bitte auf der obigen Seite prüfen.",
+        "",
+        "-- via radiosondy-status (Hermes)",
+    ]
+    html_parts.append("<p>Details bitte auf der obigen Seite prüfen.</p>")
+    html_parts.append("<p>-- via radiosondy-status (Hermes)</p>")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = RECIPIENT
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain="gmail.com")
+    msg.set_content("\n".join(lines), charset="utf-8")
+    msg.add_alternative("".join(html_parts), subtype="html")
+    return msg
+
+
 def build_message(
     sonde: str,
     new_rows: list[list[str]],
@@ -237,48 +296,30 @@ def build_message(
     html_parts.append("</table>")
 
     if overview:
-        lines += [
-            "",
-            f"Alle überwachten Sonden ({len(overview)}):",
-            "",
-        ]
-        html_parts += [
-            f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
-            '<table border="0" cellpadding="4" cellspacing="0">',
-            "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
-        ]
-        for watched_sonde, city, landing in overview:
-            watched_url = SONDE_PAGE_URL.format(sonde=watched_sonde)
-            lines.append(
-                f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'} | {watched_url}"
-            )
-            html_parts.append(
-                "<tr>"
-                f'<td><a href="{watched_url}">{watched_sonde}</a></td>'
-                f"<td>{escape(city or '-')}</td>"
-                f"<td>{escape(landing or '-')}</td>"
-                "</tr>"
-            )
-        html_parts.append("</table>")
+        overview_lines, overview_html = _overview_section(overview)
+        lines += overview_lines
+        html_parts += overview_html
 
-    lines += [
-        "",
-        "Details bitte auf der obigen Seite prüfen.",
-        "",
-        "-- via radiosondy-status (Hermes)",
+    return _finish_message(subject, lines, html_parts)
+
+
+def build_new_sonde_message(
+    sonde: str,
+    overview: list[tuple[str, str | None, str | None]] | None = None,
+) -> EmailMessage:
+    """Notification for a sonde announced by a tracker mail."""
+    url = SONDE_PAGE_URL.format(sonde=sonde)
+    subject = f"[Radiosondy] Neue Sonde {sonde}"
+    lines = [f"Neue Sonde: {sonde}", f"Link: {url}"]
+    html_parts = [
+        f'<p>Neue Sonde: <a href="{url}">{sonde}</a><br>',
+        f'Link: <a href="{url}">{url}</a></p>',
     ]
-    html_parts.append("<p>Details bitte auf der obigen Seite prüfen.</p>")
-    html_parts.append("<p>-- via radiosondy-status (Hermes)</p>")
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = GMAIL_ADDRESS
-    msg["To"] = RECIPIENT
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain="gmail.com")
-    msg.set_content("\n".join(lines), charset="utf-8")
-    msg.add_alternative("".join(html_parts), subtype="html")
-    return msg
+    if overview:
+        overview_lines, overview_html = _overview_section(overview)
+        lines += overview_lines
+        html_parts += overview_html
+    return _finish_message(subject, lines, html_parts)
 
 
 def send_message(msg: EmailMessage, password: str) -> None:
@@ -328,8 +369,11 @@ def main() -> int:
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
 
-    announced = find_announced_sondes(password)
-    for sonde in announced:
+    tracked_before = set(state["sondes"])
+    announced = find_announced_mails(password)
+    recorded = set(state.get("announced", []))
+    fresh = fresh_announcements(announced, recorded)
+    for sonde, _ in announced:
         state["sondes"].setdefault(sonde, {"rows": []})
 
     notified = 0
@@ -346,11 +390,16 @@ def main() -> int:
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
         new_rows = [r for r in rows if tuple(r) not in known]
-
-        if not new_rows:
-            continue
+        is_new = sonde in fresh
+        if sonde not in tracked_before:
+            # Rows that already existed when the sonde was first picked up are the
+            # baseline, not an update.
+            new_rows = []
 
         state["sondes"][sonde]["rows"] = rows
+
+        if not new_rows and not is_new:
+            continue
 
         overview = [
             (watched, cities.get(watched), fetch_landing_time(watched, session))
@@ -361,19 +410,32 @@ def main() -> int:
             summary = ", ".join(
                 f"{watched}={city or '-'}/{landing or '-'}" for watched, city, landing in overview
             )
-            logger.info("%s: %d new row(s) (dry run); %s", sonde, len(new_rows), summary)
+            logger.info(
+                "%s: %s (dry run); %s",
+                sonde,
+                "new sonde" if is_new else f"{len(new_rows)} new row(s)",
+                summary,
+            )
             continue
 
         try:
-            send_message(build_message(sonde, new_rows, overview), password)
+            if is_new:
+                send_message(build_new_sonde_message(sonde, overview), password)
+            else:
+                send_message(build_message(sonde, new_rows, overview), password)
         except (smtplib.SMTPException, OSError) as exc:
             logger.error("%s: sending failed: %s", sonde, exc)
             telegram_alert(f"❌ radiosondy-status: {sonde} notification failed: {exc}")
             continue
 
         notified += 1
+        if is_new:
+            state["announced"] = sorted(set(state.get("announced", [])) | {fresh[sonde]})
         if not args.quiet:
-            print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
+            if is_new:
+                print(f"{sonde}: new sonde -> {RECIPIENT}")
+            else:
+                print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
 
     if not args.dry_run:
         save_state(state)

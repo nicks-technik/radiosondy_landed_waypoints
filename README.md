@@ -70,31 +70,37 @@ Manual run (add `--dry-run` to skip running the GPX script):
 .venv/bin/python check_tracker_mail.py
 ```
 
-## Daily Status-Change Watch (e-mail)
+## Status-Change Watch (e-mail)
 
 `check_status_changes.py` watches the radiosondes that `tracker@radiosondy.info` announces by
-e-mail and reports new entries in a sonde's **Status Changes** section.
+e-mail and reports **updates only** — a mail goes out when something changed, never on a timer.
 
 *   **Source of sonde numbers:** every message from `tracker@radiosondy.info` in the Gmail inbox
     (`nick2faktor@gmail.com`), sonde number taken from the subject line.
+*   **Update triggers:**
+    *   a sonde is announced for the first time → subject `[Radiosondy] Neue Sonde <ID>`
+    *   a row appears in the sonde's **Status Changes** table that was not there before →
+      subject `[Radiosondy] <ID> Status Änderung: <STATUS>`
+*   **What counts as "announced":** the tracker mail's `Message-ID`. A sonde is announced once,
+    even if the row state is lost, so a re-run never re-reports an old mail.
 *   **Check:** the `Status Changes` table on `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>`.
-*   **Trigger:** a table row that was not there on the previous run.
-*   **Notification:** one e-mail per sonde to `radiosonde@hornick.de`, subject
-    `[Radiosondy] <ID> Status Änderung: <STATUS>`, body contains the link, the sonde number and
-    the new rows.
+*   **Notification:** one e-mail per update to `radiosonde@hornick.de`; the body contains the link,
+    the sonde number and — for a status change — the new rows.
 *   **Overview:** every notification also lists all watched sondes with their nearest city and
     predicted landing time, e.g. `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC`.
     Sondes without data yet show `-`.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to
     `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>` (the plain text part carries the
     same URLs).
-*   **Schedule:** daily at 11:35 (Europe/Berlin) from the system crontab, `flock`-guarded:
+*   **Schedule:** hourly at :23 from the system crontab, `flock`-guarded:
 
     ```cron
-    35 11 * * * /usr/bin/flock -n /tmp/radiosondy_status.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_status_changes.py' >> /home/hermes/.hermes/logs/radiosondy-status.log 2>&1
+    23 * * * * /usr/bin/flock -n /tmp/radiosondy_status.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_status_changes.py' >> /home/hermes/.hermes/logs/radiosondy-status.log 2>&1
     ```
 
-*   **State:** `~/.hermes/logs/radiosondy_status_state.json` (already reported rows per sonde).
+*   **State:** `~/.hermes/logs/radiosondy_status_state.json` — `announced` holds the tracker mail
+    message ids already reported, `sondes` holds the rows already reported per sonde. Rows a sonde
+    already had when it was first picked up are its baseline, not an update.
 *   **Mailbox access:** IMAP read-only; the app password lives in
     `~/.hermes/secrets/gmail_app_password` and is never written to the config or the repo.
 *   **Silent when nothing changes**; a run failure sends one ❌ to the Hermes News Group.

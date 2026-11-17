@@ -2,7 +2,9 @@
 
 from check_status_changes import (
     build_message,
+    build_new_sonde_message,
     format_landing_time,
+    fresh_announcements,
     parse_nearest_city,
     parse_status_rows,
     sonde_from_subject,
@@ -131,6 +133,30 @@ def test_build_message_html_escapes_city():
     assert "&lt;b&gt;Schönau&lt;/b&gt; (DE)" in html
 
 
+def test_build_new_sonde_message_announces_the_sonde():
+    msg = build_new_sonde_message("D23032007")
+    body = msg.get_body(preferencelist=("plain",)).get_content()
+    assert msg["Subject"] == "[Radiosondy] Neue Sonde D23032007"
+    assert msg["To"] == "radiosonde@hornick.de"
+    assert "Neue Sonde: D23032007" in body
+    assert "https://radiosondy.info/sonde_archive.php?sondenumber=D23032007" in body
+    assert "Status Änderungen" not in body
+
+
+def test_build_new_sonde_message_includes_overview_table():
+    overview: list[tuple[str, str | None, str | None]] = [
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
+        ("D23032007", "Randersacker (DE)", "2026-11-17 16:58 UTC"),
+    ]
+    msg = build_new_sonde_message("D23032007", overview)
+    body = msg.get_body(preferencelist=("plain",)).get_content()
+    assert "Alle überwachten Sonden (2):" in body
+    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
+    html = msg.get_body(preferencelist=("html",)).get_content()
+    assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23032007"' in html
+    assert "Schönau (DE)" in html
+
+
 def test_parse_nearest_city_english():
     html = '<h4 class="info-title">Nearest City: Rechtenbach (DE) [5.01 km]</h4>'
     assert parse_nearest_city(html) == "Rechtenbach (DE)"
@@ -160,3 +186,25 @@ def test_format_landing_time():
 
 def test_format_landing_time_invalid():
     assert format_landing_time("not-a-date") == "not-a-date"
+
+
+def test_fresh_announcements_only_reports_unseen_mails():
+    announced = [
+        ("D23029639", "msg-1"),
+        ("D23029434", "msg-2"),
+        ("D23032007", "msg-3"),
+    ]
+    assert fresh_announcements(announced, {"msg-1"}) == {
+        "D23029434": "msg-2",
+        "D23032007": "msg-3",
+    }
+
+
+def test_fresh_announcements_ignores_missing_sonde_entries():
+    """A sonde missing from the row state is not re-announced once its mail is known."""
+    announced = [("D23029639", "msg-1")]
+    assert fresh_announcements(announced, {"msg-1"}) == {}
+
+
+def test_fresh_announcements_empty():
+    assert fresh_announcements([], set()) == {}
