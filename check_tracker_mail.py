@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import smtplib
 import subprocess
 import sys
 from email.message import Message
@@ -30,6 +31,8 @@ from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
+
+from check_status_changes import RECIPIENT, send_new_sonde_notification
 
 # --- Configuration -----------------------------------------------------------
 GMAIL_ADDRESS = os.environ.get("RADIOSONDY_GMAIL_ADDRESS", "nick2faktor@gmail.com")
@@ -48,6 +51,7 @@ SCRIPT_TIMEOUT_S = 300
 logger = logging.getLogger("radiosondy-mail")
 
 DETAILS_LINK_RE = re.compile(r"https://radiosondy\.info/sonde(?:\.php|_archive\.php)\?sondenumber=[A-Za-z0-9]+")
+SONDE_NUMBER_RE = re.compile(r"sondenumber=([A-Za-z0-9]+)")
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -124,6 +128,12 @@ def tracker_messages(password: str) -> list[tuple[str, Message]]:
     return result
 
 
+def sonde_number(url: str) -> str | None:
+    """'...sondenumber=D23029639' -> 'D23029639'."""
+    match = SONDE_NUMBER_RE.search(url)
+    return match.group(1) if match else None
+
+
 def run_gpx_script(url: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(GPX_SCRIPT), url],
@@ -189,6 +199,9 @@ def main() -> int:
 
         if args.dry_run:
             logger.info("would run %s for %s", GPX_SCRIPT.name, url)
+            sonde = sonde_number(url)
+            if sonde:
+                logger.info("would mail the sonde overview for %s", sonde)
             processed.add(message_id)
             ran += 1
             continue
@@ -215,6 +228,17 @@ def main() -> int:
         ran += 1
         if not args.quiet:
             print(f"processed {url} -> GPX send OK")
+
+        sonde = sonde_number(url)
+        if sonde:
+            try:
+                send_new_sonde_notification(sonde, password)
+            except (smtplib.SMTPException, OSError, requests.exceptions.RequestException) as exc:
+                logger.error("update mail failed for %s: %s", sonde, exc)
+                telegram_alert(f"❌ radiosondy-mail: update mail failed for {sonde}: {exc}")
+            else:
+                if not args.quiet:
+                    print(f"update mail sent for {sonde} -> {RECIPIENT}")
 
     state["processed"] = sorted(processed)
     save_state(state)

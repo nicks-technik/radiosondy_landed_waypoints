@@ -40,6 +40,12 @@ def test_details_link_missing():
     assert c.details_link(make_message("<html><body>nothing</body></html>")) is None
 
 
+def test_sonde_number_from_url():
+    assert c.sonde_number("https://radiosondy.info/sonde.php?sondenumber=D23029639") == "D23029639"
+    assert c.sonde_number("https://radiosondy.info/sonde_archive.php?sondenumber=X3722094") == "X3722094"
+    assert c.sonde_number("https://example.com/nope") is None
+
+
 def test_state_roundtrip(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(c, "STATE_FILE", state_file)

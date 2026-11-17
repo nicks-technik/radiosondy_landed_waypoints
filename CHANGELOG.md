@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `check_tracker_mail.py`: hourly check for new `tracker@radiosondy.info` mail; runs `main.py`
-  with the link from the mail's "Details" button so the GPX ZIP reaches Telegram.
-- `check_status_changes.py`: hourly watch that mails updates only — a newly announced sonde
-  (`[Radiosondy] Neue Sonde <ID>`) or a new row in the "Status Changes" table of a tracked
-  sonde's radiosondy.info archive page (`[Radiosondy] <ID> Status Änderung: <STATUS>`).
+  with the link from the mail's "Details" button so the GPX ZIP reaches Telegram, and mails the
+  sonde overview to `radiosonde@hornick.de` (`[Radiosondy] Neue Sonde <ID>`).
+- `check_status_changes.py`: daily watch of the "Status Changes" table on each tracked
+  sonde's radiosondy.info archive page; new rows are mailed to `radiosonde@hornick.de`.
   Every notification also lists all watched sondes with nearest city and predicted landing time.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.

@@ -4,7 +4,6 @@ from check_status_changes import (
     build_message,
     build_new_sonde_message,
     format_landing_time,
-    fresh_announcements,
     parse_nearest_city,
     parse_status_rows,
     sonde_from_subject,
@@ -186,25 +185,3 @@ def test_format_landing_time():
 
 def test_format_landing_time_invalid():
     assert format_landing_time("not-a-date") == "not-a-date"
-
-
-def test_fresh_announcements_only_reports_unseen_mails():
-    announced = [
-        ("D23029639", "msg-1"),
-        ("D23029434", "msg-2"),
-        ("D23032007", "msg-3"),
-    ]
-    assert fresh_announcements(announced, {"msg-1"}) == {
-        "D23029434": "msg-2",
-        "D23032007": "msg-3",
-    }
-
-
-def test_fresh_announcements_ignores_missing_sonde_entries():
-    """A sonde missing from the row state is not re-announced once its mail is known."""
-    announced = [("D23029639", "msg-1")]
-    assert fresh_announcements(announced, {"msg-1"}) == {}
-
-
-def test_fresh_announcements_empty():
-    assert fresh_announcements([], set()) == {}

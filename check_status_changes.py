@@ -78,7 +78,7 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("State file unreadable, starting fresh: %s", STATE_FILE)
-    return {"sondes": {}, "announced": []}
+    return {"sondes": {}}
 
 
 def save_state(state: dict) -> None:
@@ -131,11 +131,9 @@ def find_announced_mails(password: str) -> list[tuple[str, str]]:
     return list(dict.fromkeys(found))
 
 
-def fresh_announcements(
-    announced: list[tuple[str, str]], recorded: set[str]
-) -> dict[str, str]:
-    """sonde -> message_id for tracker mails that were not announced yet."""
-    return {sonde: msg_id for sonde, msg_id in announced if msg_id not in recorded}
+def announced_sondes(password: str) -> list[str]:
+    """Sonde numbers announced by tracker mails in the inbox."""
+    return [sonde for sonde, _ in find_announced_mails(password)]
 
 
 def sonde_from_subject(subject: str) -> str | None:
@@ -328,6 +326,25 @@ def send_message(msg: EmailMessage, password: str) -> None:
         smtp.send_message(msg)
 
 
+def send_new_sonde_notification(sonde: str, password: str) -> None:
+    """Mail the sonde overview for a newly announced sonde.
+
+    Used by the hourly tracker-mail handler so a new sonde is reported right
+    away; raises on failure so the caller can alert.
+    """
+    session = requests.Session()
+    session.headers.update(HTTP_HEADERS)
+    overview: list[tuple[str, str | None, str | None]] = []
+    for watched in sorted(announced_sondes(password)):
+        try:
+            html = fetch_sonde_html(watched, session)
+        except requests.exceptions.RequestException as exc:
+            logger.warning("%s: fetch failed: %s", watched, exc)
+            continue
+        overview.append((watched, parse_nearest_city(html), fetch_landing_time(watched, session)))
+    send_message(build_new_sonde_message(sonde, overview), password)
+
+
 def telegram_alert(text: str) -> None:
     """One ❌ to the News Group when the run itself fails."""
     if not ENV_FILE.exists():
@@ -370,10 +387,7 @@ def main() -> int:
     session.headers.update(HTTP_HEADERS)
 
     tracked_before = set(state["sondes"])
-    announced = find_announced_mails(password)
-    recorded = set(state.get("announced", []))
-    fresh = fresh_announcements(announced, recorded)
-    for sonde, _ in announced:
+    for sonde in announced_sondes(password):
         state["sondes"].setdefault(sonde, {"rows": []})
 
     notified = 0
@@ -390,16 +404,15 @@ def main() -> int:
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
         new_rows = [r for r in rows if tuple(r) not in known]
-        is_new = sonde in fresh
         if sonde not in tracked_before:
             # Rows that already existed when the sonde was first picked up are the
             # baseline, not an update.
             new_rows = []
 
-        state["sondes"][sonde]["rows"] = rows
-
-        if not new_rows and not is_new:
+        if not new_rows:
             continue
+
+        state["sondes"][sonde]["rows"] = rows
 
         overview = [
             (watched, cities.get(watched), fetch_landing_time(watched, session))
@@ -410,32 +423,19 @@ def main() -> int:
             summary = ", ".join(
                 f"{watched}={city or '-'}/{landing or '-'}" for watched, city, landing in overview
             )
-            logger.info(
-                "%s: %s (dry run); %s",
-                sonde,
-                "new sonde" if is_new else f"{len(new_rows)} new row(s)",
-                summary,
-            )
+            logger.info("%s: %d new row(s) (dry run); %s", sonde, len(new_rows), summary)
             continue
 
         try:
-            if is_new:
-                send_message(build_new_sonde_message(sonde, overview), password)
-            else:
-                send_message(build_message(sonde, new_rows, overview), password)
+            send_message(build_message(sonde, new_rows, overview), password)
         except (smtplib.SMTPException, OSError) as exc:
             logger.error("%s: sending failed: %s", sonde, exc)
             telegram_alert(f"❌ radiosondy-status: {sonde} notification failed: {exc}")
             continue
 
         notified += 1
-        if is_new:
-            state["announced"] = sorted(set(state.get("announced", [])) | {fresh[sonde]})
         if not args.quiet:
-            if is_new:
-                print(f"{sonde}: new sonde -> {RECIPIENT}")
-            else:
-                print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
+            print(f"{sonde}: {len(new_rows)} new status change(s) -> {RECIPIENT}")
 
     if not args.dry_run:
         save_state(state)
