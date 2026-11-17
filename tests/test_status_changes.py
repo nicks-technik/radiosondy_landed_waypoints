@@ -99,7 +99,7 @@ def test_build_message_lists_all_sondes():
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
     assert "Alle überwachten Sonden (3)" in body
-    assert f"alle Tabs öffnen: {c.OPEN_ALL_URL}" in body
+    assert f"alle Tabs öffnen: {c.OPEN_ALL_URL}?sondes=D23029639,D23029434,D23032007" in body
     assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
     assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC" in body
     assert "D23032007 | - | Landung: -" in body
@@ -107,11 +107,18 @@ def test_build_message_lists_all_sondes():
         assert f"https://radiosondy.info/sonde_archive.php?sondenumber={watched}" in body
 
 
+def test_open_all_url_carries_every_sonde():
+    assert c.open_all_url(["D23029639", "D23029434"]) == (
+        f"{c.OPEN_ALL_URL}?sondes=D23029639,D23029434"
+    )
+    assert c.open_all_url([]) == f"{c.OPEN_ALL_URL}?sondes="
+
+
 def test_build_message_links_open_all_page():
     overview = [("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC")]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
-    assert f'<a href="{c.OPEN_ALL_URL}">' in html
+    assert f'<a href="{c.OPEN_ALL_URL}?sondes=D23029639">' in html
     assert "alle Tabs öffnen" in html
 
 

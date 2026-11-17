@@ -49,6 +49,11 @@ STATE_FILE = Path(
 )
 ENV_FILE = Path("/home/hermes/.hermes/.env")
 
+
+def open_all_url(sondes: list[str]) -> str:
+    """Link that opens every sonde in its own tab (see radiosondy_web.py)."""
+    return f"{OPEN_ALL_URL}?sondes={','.join(sondes)}"
+
 HTTP_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -238,13 +243,14 @@ def build_message(
     html_parts.append("</table>")
 
     if overview:
+        link = open_all_url([sonde for sonde, _, _ in overview])
         lines += [
             "",
-            f"Alle überwachten Sonden ({len(overview)}) - alle Tabs öffnen: {OPEN_ALL_URL}",
+            f"Alle überwachten Sonden ({len(overview)}) - alle Tabs öffnen: {link}",
             "",
         ]
         open_all_link = (
-            f'<p><b><a href="{OPEN_ALL_URL}">Alle überwachten Sonden ({len(overview)})'
+            f'<p><b><a href="{link}">Alle überwachten Sonden ({len(overview)})'
             " - alle Tabs öffnen</a></b></p>"
         )
         html_parts += [
