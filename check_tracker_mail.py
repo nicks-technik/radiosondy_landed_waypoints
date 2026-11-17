@@ -131,6 +131,7 @@ def run_gpx_script(url: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=SCRIPT_TIMEOUT_S,
+        check=False,
     )
 
 

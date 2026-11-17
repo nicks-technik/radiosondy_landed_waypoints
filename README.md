@@ -88,6 +88,10 @@ e-mail and reports new entries in a sonde's **Status Changes** section.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to
     `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>` (the plain text part carries the
     same URLs).
+*   **One click for all tabs:** the count line is a link to a small always-on page
+    (`radiosondy_web.py`, systemd user service `radiosondy-web.service`, default
+    `http://10.53.164.194:12346/`) that lists every watched sonde and opens all of them in tabs.
+    It reads the same state file, so it always matches the mail.
 *   **Schedule:** daily at 11:35 (Europe/Berlin) from the system crontab, `flock`-guarded:
 
     ```cron

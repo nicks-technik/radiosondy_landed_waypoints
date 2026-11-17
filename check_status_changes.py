@@ -43,6 +43,7 @@ TRACKER_SENDER = "tracker@radiosondy.info"
 SONDE_PAGE_URL = "https://radiosondy.info/sonde_archive.php?sondenumber={sonde}"
 PREDICT_KML_URL = "https://radiosondy.info/local_storage/PREDICT/{sonde}_predict.kml"
 STATUS_TABLE_ID = "Table6"
+OPEN_ALL_URL = os.environ.get("RADIOSONDY_OPEN_ALL_URL", "http://10.53.164.194:12346/")
 STATE_FILE = Path(
     os.environ.get("RADIOSONDY_STATE_FILE", "/home/hermes/.hermes/logs/radiosondy_status_state.json")
 )
@@ -182,7 +183,7 @@ def parse_nearest_city(html: str) -> str | None:
 
 def format_landing_time(raw: str) -> str:
     try:
-        moment = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        moment = datetime.fromisoformat(raw)
     except ValueError:
         return raw
     return moment.strftime("%Y-%m-%d %H:%M UTC")
@@ -239,11 +240,15 @@ def build_message(
     if overview:
         lines += [
             "",
-            f"Alle überwachten Sonden ({len(overview)}):",
+            f"Alle überwachten Sonden ({len(overview)}) - alle Tabs öffnen: {OPEN_ALL_URL}",
             "",
         ]
+        open_all_link = (
+            f'<p><b><a href="{OPEN_ALL_URL}">Alle überwachten Sonden ({len(overview)})'
+            " - alle Tabs öffnen</a></b></p>"
+        )
         html_parts += [
-            f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
+            open_all_link,
             '<table border="0" cellpadding="4" cellspacing="0">',
             "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
         ]
