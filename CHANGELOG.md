@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every notification also lists all watched sondes with nearest city and predicted landing time.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
+- The notification is now plain text + HTML, and every sonde in the list links to its
+  radiosondy.info archive page.
 - Tracked sondes are taken from `tracker@radiosondy.info` messages in the Gmail inbox.
 - Unit tests for subject parsing, table parsing, notification and mail-link handling.
 

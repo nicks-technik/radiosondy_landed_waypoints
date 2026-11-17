@@ -28,6 +28,7 @@ from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import requests
 from bs4 import BeautifulSoup
@@ -224,16 +225,41 @@ def build_message(
     for row in new_rows:
         lines.append("  " + " | ".join(row))
 
+    html_parts = [
+        f'<p>Radiosonde: <a href="{url}">{sonde}</a><br>',
+        f'Link: <a href="{url}">{url}</a></p>',
+        "<p><b>Neue Einträge im Abschnitt 'Status Änderungen':</b></p>",
+        '<table border="0" cellpadding="4" cellspacing="0">',
+    ]
+    for row in new_rows:
+        cells = "".join(f"<td>{escape(cell)}</td>" for cell in row)
+        html_parts.append(f"<tr>{cells}</tr>")
+    html_parts.append("</table>")
+
     if overview:
         lines += [
             "",
             f"Alle überwachten Sonden ({len(overview)}):",
             "",
         ]
+        html_parts += [
+            f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
+            '<table border="0" cellpadding="4" cellspacing="0">',
+            "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
+        ]
         for watched_sonde, city, landing in overview:
+            watched_url = SONDE_PAGE_URL.format(sonde=watched_sonde)
             lines.append(
-                f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'}"
+                f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'} | {watched_url}"
             )
+            html_parts.append(
+                "<tr>"
+                f'<td><a href="{watched_url}">{watched_sonde}</a></td>'
+                f"<td>{escape(city or '-')}</td>"
+                f"<td>{escape(landing or '-')}</td>"
+                "</tr>"
+            )
+        html_parts.append("</table>")
 
     lines += [
         "",
@@ -241,6 +267,8 @@ def build_message(
         "",
         "-- via radiosondy-status (Hermes)",
     ]
+    html_parts.append("<p>Details bitte auf der obigen Seite prüfen.</p>")
+    html_parts.append("<p>-- via radiosondy-status (Hermes)</p>")
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -249,6 +277,7 @@ def build_message(
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain="gmail.com")
     msg.set_content("\n".join(lines), charset="utf-8")
+    msg.add_alternative("".join(html_parts), subtype="html")
     return msg
 
 

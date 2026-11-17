@@ -81,7 +81,7 @@ def test_parse_status_rows_missing_table():
 
 def test_build_message_contains_link_and_sonde():
     msg = build_message("D23031993", parse_status_rows(TABLE_HTML))
-    body = msg.get_content()
+    body = msg.get_body(preferencelist=("plain",)).get_content()
     assert msg["Subject"] == "[Radiosondy] D23031993 Status Änderung: FOUND"
     assert msg["To"] == "radiosonde@hornick.de"
     assert "https://radiosondy.info/sonde_archive.php?sondenumber=D23031993" in body
@@ -95,11 +95,33 @@ def test_build_message_lists_all_sondes():
         ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC"),
         ("D23032007", None, None),
     ]
-    body = build_message("D23029639", parse_status_rows(TABLE_HTML), overview).get_content()
+    msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
+    body = msg.get_body(preferencelist=("plain",)).get_content()
     assert "Alle überwachten Sonden (3):" in body
     assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
     assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC" in body
     assert "D23032007 | - | Landung: -" in body
+    for watched, _, _ in overview:
+        assert f"https://radiosondy.info/sonde_archive.php?sondenumber={watched}" in body
+
+
+def test_build_message_html_links_every_sonde():
+    overview = [
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
+        ("D23032007", None, None),
+    ]
+    msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
+    html = msg.get_body(preferencelist=("html",)).get_content()
+    assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23029639"' in html
+    assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23032007"' in html
+    assert "Schönau (DE)" in html
+
+
+def test_build_message_html_escapes_city():
+    overview = [("D23029639", "<b>Schönau</b> (DE)", None)]
+    msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
+    html = msg.get_body(preferencelist=("html",)).get_content()
+    assert "&lt;b&gt;Schönau&lt;/b&gt; (DE)" in html
 
 
 def test_parse_nearest_city_english():
