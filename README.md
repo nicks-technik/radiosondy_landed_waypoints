@@ -103,7 +103,8 @@ stays silent when nothing changed.
     Sondes without data yet show `-`. The table is sorted youngest first (latest landing on top).
 *   **QTH distance:** taken from the tracker mail itself (`Entfernung von Deinem QTH 4.05 km ·
     51° NE`), so it uses the QTH stored in your radiosondy.info account — nothing to configure.
-    The value is kept in the state file so it survives the mail being deleted.
+*   **Watched set = the inbox:** the list contains exactly the sondes whose tracker mail is still
+    in the inbox. Delete the mail and the sonde disappears from the table again.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to
     `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>` (the plain text part carries the
     same URLs).
@@ -113,8 +114,8 @@ stays silent when nothing changed.
     35 11 * * * /usr/bin/flock -n /tmp/radiosondy_status.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_status_changes.py' >> /home/hermes/.hermes/logs/radiosondy-status.log 2>&1
     ```
 
-*   **State:** `~/.hermes/logs/radiosondy_status_state.json` — already reported rows and the
-    QTH distance per sonde.
+*   **State:** `~/.hermes/logs/radiosondy_status_state.json` — already reported rows per sonde.
+    Sondes are pruned from it as soon as their tracker mail leaves the inbox.
 *   **Mailbox access:** IMAP read-only; the app password lives in
     `~/.hermes/secrets/gmail_app_password` and is never written to the config or the repo.
 *   **Silent when nothing changes**; a run failure sends one ❌ to the Hermes News Group.

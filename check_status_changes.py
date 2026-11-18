@@ -162,18 +162,21 @@ def find_announced_mails(password: str) -> list[dict]:
     return list(found.values())
 
 
-def watched_sondes(password: str, state: dict) -> list[str]:
-    """Every sonde we track, oldest state plus the currently announced mails.
+def watched_sondes(password: str, state: dict) -> dict[str, str]:
+    """sonde -> QTH distance for every sonde we watch.
 
-    Also refreshes the QTH distance of each sonde from its tracker mail, so the
-    distance stays available after the mail itself has been deleted.
+    The watched set is exactly the tracker mails in the inbox: a sonde whose mail
+    has been deleted disappears from the list again.
     """
     announced = {record["sonde"]: record for record in find_announced_mails(password)}
+    state["sondes"] = {
+        sonde: entry for sonde, entry in state["sondes"].items() if sonde in announced
+    }
+    distances: dict[str, str] = {}
     for sonde, record in announced.items():
         state["sondes"].setdefault(sonde, {"rows": []})
-        if record["distance"]:
-            state["sondes"][sonde]["distance"] = record["distance"]
-    return sorted(state["sondes"])
+        distances[sonde] = record["distance"] or "-"
+    return distances
 
 
 def sonde_from_subject(subject: str) -> str | None:
@@ -385,8 +388,9 @@ def send_new_sonde_notification(sonde: str, password: str) -> None:
     state = load_state()
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
+    distances = watched_sondes(password, state)
     overview: list[OverviewRow] = []
-    for watched in watched_sondes(password, state):
+    for watched in sorted(distances):
         try:
             html = fetch_sonde_html(watched, session)
         except requests.exceptions.RequestException as exc:
@@ -396,7 +400,7 @@ def send_new_sonde_notification(sonde: str, password: str) -> None:
             watched,
             parse_nearest_city(html),
             fetch_landing_time(watched, session),
-            state["sondes"][watched].get("distance", "-"),
+            distances[watched],
         ))
     save_state(state)
     send_message(build_new_sonde_message(sonde, overview), password)
@@ -443,12 +447,12 @@ def main() -> int:
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
 
+    distances = watched_sondes(password, state)
     tracked_before = set(state["sondes"])
-    sondes = watched_sondes(password, state)
 
     notified = 0
     details: dict[str, tuple[str | None, str | None, str]] = {}
-    for sonde in sondes:
+    for sonde in sorted(distances):
         try:
             html = fetch_sonde_html(sonde, session)
         except requests.exceptions.RequestException as exc:
@@ -457,7 +461,7 @@ def main() -> int:
 
         city = parse_nearest_city(html)
         landing = fetch_landing_time(sonde, session)
-        details[sonde] = (city, landing, state["sondes"][sonde].get("distance", "-"))
+        details[sonde] = (city, landing, distances[sonde])
         rows = parse_status_rows(html)
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]

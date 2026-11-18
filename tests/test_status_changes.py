@@ -11,6 +11,7 @@ from check_status_changes import (
     parse_tracker_distance,
     sonde_from_subject,
     tracker_body_text,
+    watched_sondes,
 )
 
 TABLE_HTML = """
@@ -223,3 +224,24 @@ def test_tracker_body_text_strips_html():
     message = EmailMessage()
     message.set_content("<p>Entfernung von Deinem QTH 4.05 km · 51° NE</p>", subtype="html")
     assert "4.05 km" in tracker_body_text(message)
+
+
+def test_watched_sondes_drops_mail_that_left_the_inbox(monkeypatch):
+    state = {"sondes": {"D23029639": {"rows": []}, "D23034927": {"rows": []}}}
+    monkeypatch.setattr(
+        "check_status_changes.find_announced_mails",
+        lambda password: [{"sonde": "D23034927", "message_id": "m1", "distance": "4.05 km"}],
+    )
+    distances = watched_sondes("pw", state)
+    assert distances == {"D23034927": "4.05 km"}
+    assert set(state["sondes"]) == {"D23034927"}
+
+
+def test_watched_sondes_adds_new_mail(monkeypatch):
+    state = {"sondes": {}}
+    monkeypatch.setattr(
+        "check_status_changes.find_announced_mails",
+        lambda password: [{"sonde": "D23034927", "message_id": "m1", "distance": None}],
+    )
+    assert watched_sondes("pw", state) == {"D23034927": "-"}
+    assert state["sondes"]["D23034927"] == {"rows": []}

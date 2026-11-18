@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sonde's radiosondy.info archive page; new rows are mailed to `radiosonde@hornick.de`.
   Every notification also lists all watched sondes with nearest city, predicted landing time
   and the "Entfernung von Deinem QTH" taken from the tracker mail, sorted youngest first.
+  The watched set is exactly the tracker mails in the inbox — a deleted mail drops the sonde.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its
