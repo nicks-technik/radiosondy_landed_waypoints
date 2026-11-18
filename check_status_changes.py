@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import email
 import imaplib
 import json
 import logging
@@ -27,6 +28,7 @@ import smtplib
 import sys
 import time
 from datetime import datetime
+from email import policy
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
@@ -69,6 +71,12 @@ NEAREST_CITY_RE = re.compile(r"(?:Nearest City|Nächste Stadt)\s*:\s*([^<\"\[\]]
 LANDING_TIME_RE = re.compile(
     r"Balloon landing at [^<]*?at\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z)", re.IGNORECASE
 )
+# "Entfernung von Deinem QTH 4.05 km · 51° NE" in the tracker mail.
+TRACKER_QTH_RE = re.compile(
+    r"Entfernung von Deinem QTH[^0-9]{0,20}([0-9]+(?:[.,][0-9]+)?)\s*km"
+    r"(?:\s*·\s*([0-9]+)°\s*([A-Z]{1,2}))?",
+    re.IGNORECASE,
+)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -97,43 +105,75 @@ def norm(text: str) -> str:
 
 
 # ---Mailbox: find announced sondes ------------------------------------------
-def find_announced_mails(password: str) -> list[tuple[str, str]]:
-    """(sonde, message_id) for every tracker mail in the inbox."""
-    found: list[tuple[str, str]] = []
+def tracker_body_text(message: email.message.Message) -> str:
+    """Readable text of a tracker mail (HTML part preferred)."""
+    body = message.get_body(preferencelist=("html", "plain"))
+    if body is None:
+        return ""
+    content = body.get_content()
+    if body.get_content_type() == "text/html":
+        content = BeautifulSoup(content, "html.parser").get_text(" ")
+    return norm(content)
+
+
+def parse_tracker_distance(text: str) -> str | None:
+    """'Entfernung von Deinem QTH 4.05 km · 51° NE' -> '4.05 km · 51° NE'."""
+    match = TRACKER_QTH_RE.search(text)
+    if not match:
+        return None
+    value = match.group(1).replace(",", ".")
+    if match.group(2) and match.group(3):
+        return f"{value} km · {match.group(2)}° {match.group(3)}"
+    return f"{value} km"
+
+
+def find_announced_mails(password: str) -> list[dict]:
+    """Every tracker mail in the inbox: sonde, message_id and QTH distance."""
+    found: dict[str, dict] = {}
     try:
         with imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30) as imap:
             imap.login(GMAIL_ADDRESS, password)
             imap.select("INBOX")
             typ, data = imap.search(None, "FROM", TRACKER_SENDER)
             if typ != "OK" or not data or not data[0]:
-                return found
+                return []
             for msg_id in data[0].split():
-                typ, msg_data = imap.fetch(msg_id, "(BODY.PEEK[HEADER.FIELDS (SUBJECT MESSAGE-ID)])")
+                typ, msg_data = imap.fetch(msg_id, "(BODY.PEEK[])")
                 if typ != "OK" or not msg_data:
                     continue
                 part = msg_data[0]
-                payload = part[1] if isinstance(part, tuple) and len(part) > 1 else b""
-                if not isinstance(payload, (bytes, bytearray)):
+                raw = part[1] if isinstance(part, tuple) and len(part) > 1 else b""
+                if not isinstance(raw, (bytes, bytearray)):
                     continue
-                raw = payload.decode("utf-8", errors="replace")
-                subject = raw.split("Subject:", 1)[-1].split("\r\n", 1)[0].strip()
-                message_id = ""
-                for line in raw.splitlines():
-                    if line.lower().startswith("message-id:"):
-                        message_id = line.split(":", 1)[1].strip().strip("<>")
-                        break
+                message = email.message_from_bytes(raw, policy=policy.default)
+                subject = str(message["Subject"] or "")
+                message_id = str(message["Message-ID"] or "").strip("<>")
                 sonde = sonde_from_subject(subject)
-                if sonde and message_id:
-                    found.append((sonde, message_id))
+                if not sonde or not message_id:
+                    continue
+                found[message_id] = {
+                    "sonde": sonde,
+                    "message_id": message_id,
+                    "distance": parse_tracker_distance(tracker_body_text(message)),
+                }
     except (imaplib.IMAP4.error, OSError) as exc:
         logger.error("Mailbox search failed: %s", exc)
         raise
-    return list(dict.fromkeys(found))
+    return list(found.values())
 
 
-def announced_sondes(password: str) -> list[str]:
-    """Sonde numbers announced by tracker mails in the inbox."""
-    return [sonde for sonde, _ in find_announced_mails(password)]
+def watched_sondes(password: str, state: dict) -> list[str]:
+    """Every sonde we track, oldest state plus the currently announced mails.
+
+    Also refreshes the QTH distance of each sonde from its tracker mail, so the
+    distance stays available after the mail itself has been deleted.
+    """
+    announced = {record["sonde"]: record for record in find_announced_mails(password)}
+    for sonde, record in announced.items():
+        state["sondes"].setdefault(sonde, {"rows": []})
+        if record["distance"]:
+            state["sondes"][sonde]["distance"] = record["distance"]
+    return sorted(state["sondes"])
 
 
 def sonde_from_subject(subject: str) -> str | None:
@@ -218,24 +258,34 @@ def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str
 
 
 # --- Notification ------------------------------------------------------------
-def _overview_section(
-    overview: list[tuple[str, str | None, str | None]],
-) -> tuple[list[str], list[str]]:
-    """The 'all watched sondes' table, shared by both notification types."""
-    lines = ["", f"Alle überwachten Sonden ({len(overview)}):", ""]
+# One row of the sonde overview: (sonde, nearest city, landing time, QTH distance).
+OverviewRow = tuple[str, str | None, str | None, str]
+
+
+def _overview_section(overview: list[OverviewRow]) -> tuple[list[str], list[str]]:
+    """The 'all watched sondes' table, youngest (latest landing) first."""
+    ordered = sorted(overview, key=lambda row: row[2] or "", reverse=True)
+    lines = ["", f"Alle überwachten Sonden ({len(ordered)}):", ""]
     html_parts = [
-        f"<p><b>Alle überwachten Sonden ({len(overview)}):</b></p>",
+        f"<p><b>Alle überwachten Sonden ({len(ordered)}):</b></p>",
         '<table border="0" cellpadding="4" cellspacing="0">',
-        "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th></tr>",
+        (
+            "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th>"
+            "<th>Entfernung vom QTH</th></tr>"
+        ),
     ]
-    for watched_sonde, city, landing in overview:
+    for watched_sonde, city, landing, distance in ordered:
         watched_url = SONDE_PAGE_URL.format(sonde=watched_sonde)
-        lines.append(f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'} | {watched_url}")
+        lines.append(
+            f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'}"
+            f" | {distance} | {watched_url}"
+        )
         html_parts.append(
             "<tr>"
             f'<td><a href="{watched_url}">{watched_sonde}</a></td>'
             f"<td>{escape(city or '-')}</td>"
             f"<td>{escape(landing or '-')}</td>"
+            f"<td>{escape(distance)}</td>"
             "</tr>"
         )
     html_parts.append("</table>")
@@ -266,7 +316,7 @@ def _finish_message(subject: str, lines: list[str], html_parts: list[str]) -> Em
 def build_message(
     sonde: str,
     new_rows: list[list[str]],
-    overview: list[tuple[str, str | None, str | None]] | None = None,
+    overview: list[OverviewRow] | None = None,
 ) -> EmailMessage:
     url = SONDE_PAGE_URL.format(sonde=sonde)
     statuses = [row[4] if len(row) > 4 else "?" for row in new_rows]
@@ -303,7 +353,7 @@ def build_message(
 
 def build_new_sonde_message(
     sonde: str,
-    overview: list[tuple[str, str | None, str | None]] | None = None,
+    overview: list[OverviewRow] | None = None,
 ) -> EmailMessage:
     """Notification for a sonde announced by a tracker mail."""
     url = SONDE_PAGE_URL.format(sonde=sonde)
@@ -332,16 +382,23 @@ def send_new_sonde_notification(sonde: str, password: str) -> None:
     Used by the hourly tracker-mail handler so a new sonde is reported right
     away; raises on failure so the caller can alert.
     """
+    state = load_state()
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
-    overview: list[tuple[str, str | None, str | None]] = []
-    for watched in sorted(announced_sondes(password)):
+    overview: list[OverviewRow] = []
+    for watched in watched_sondes(password, state):
         try:
             html = fetch_sonde_html(watched, session)
         except requests.exceptions.RequestException as exc:
             logger.warning("%s: fetch failed: %s", watched, exc)
             continue
-        overview.append((watched, parse_nearest_city(html), fetch_landing_time(watched, session)))
+        overview.append((
+            watched,
+            parse_nearest_city(html),
+            fetch_landing_time(watched, session),
+            state["sondes"][watched].get("distance", "-"),
+        ))
+    save_state(state)
     send_message(build_new_sonde_message(sonde, overview), password)
 
 
@@ -387,19 +444,20 @@ def main() -> int:
     session.headers.update(HTTP_HEADERS)
 
     tracked_before = set(state["sondes"])
-    for sonde in announced_sondes(password):
-        state["sondes"].setdefault(sonde, {"rows": []})
+    sondes = watched_sondes(password, state)
 
     notified = 0
-    cities: dict[str, str | None] = {}
-    for sonde in sorted(state["sondes"]):
+    details: dict[str, tuple[str | None, str | None, str]] = {}
+    for sonde in sondes:
         try:
             html = fetch_sonde_html(sonde, session)
         except requests.exceptions.RequestException as exc:
             logger.error("%s: fetch failed: %s", sonde, exc)
             continue
 
-        cities[sonde] = parse_nearest_city(html)
+        city = parse_nearest_city(html)
+        landing = fetch_landing_time(sonde, session)
+        details[sonde] = (city, landing, state["sondes"][sonde].get("distance", "-"))
         rows = parse_status_rows(html)
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
@@ -415,13 +473,14 @@ def main() -> int:
         state["sondes"][sonde]["rows"] = rows
 
         overview = [
-            (watched, cities.get(watched), fetch_landing_time(watched, session))
+            (watched, *details.get(watched, (None, None, "-")))
             for watched in sorted(state["sondes"])
         ]
 
         if args.dry_run:
             summary = ", ".join(
-                f"{watched}={city or '-'}/{landing or '-'}" for watched, city, landing in overview
+                f"{watched}={city or '-'}/{landing or '-'}/{distance}"
+                for watched, city, landing, distance in overview
             )
             logger.info("%s: %d new row(s) (dry run); %s", sonde, len(new_rows), summary)
             continue

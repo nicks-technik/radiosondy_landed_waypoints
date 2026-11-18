@@ -1,12 +1,16 @@
 """Tests for the daily Status Changes watcher."""
 
+from email.message import EmailMessage
+
 from check_status_changes import (
     build_message,
     build_new_sonde_message,
     format_landing_time,
     parse_nearest_city,
     parse_status_rows,
+    parse_tracker_distance,
     sonde_from_subject,
+    tracker_body_text,
 )
 
 TABLE_HTML = """
@@ -92,22 +96,22 @@ def test_build_message_contains_link_and_sonde():
 
 def test_build_message_lists_all_sondes():
     overview = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
-        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC"),
-        ("D23032007", None, None),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
+        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km"),
+        ("D23032007", None, None, "-"),
     ]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
     assert "Alle überwachten Sonden (3):" in body
-    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
-    assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC" in body
-    assert "D23032007 | - | Landung: -" in body
-    for watched, _, _ in overview:
+    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km" in body
+    assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC | 24.3 km" in body
+    assert "D23032007 | - | Landung: - | -" in body
+    for watched, _, _, _ in overview:
         assert f"https://radiosondy.info/sonde_archive.php?sondenumber={watched}" in body
 
 
 def test_build_message_links_open_all_page():
-    overview = [("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC")]
+    overview = [("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km")]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert '<a href="https://radiosondy.info/sonde_archive.php?sondenumber=D23029639">' in html
@@ -115,21 +119,35 @@ def test_build_message_links_open_all_page():
 
 def test_build_message_html_links_every_sonde():
     overview = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
-        ("D23032007", None, None),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
+        ("D23032007", None, None, "-"),
     ]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23029639"' in html
     assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23032007"' in html
     assert "Schönau (DE)" in html
+    assert "34.3 km" in html
 
 
 def test_build_message_html_escapes_city():
-    overview = [("D23029639", "<b>Schönau</b> (DE)", None)]
+    overview = [("D23029639", "<b>Schönau</b> (DE)", None, "-")]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert "&lt;b&gt;Schönau&lt;/b&gt; (DE)" in html
+
+
+def test_overview_is_sorted_youngest_first():
+    overview = [
+        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km"),
+        ("D23032096", "Kleinrinderfeld (DE)", "2026-11-17 18:27 UTC", "31.0 km"),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
+        ("V3220905", "Aura im Sinngrund (DE)", None, "-"),
+    ]
+    msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
+    body = msg.get_body(preferencelist=("plain",)).get_content()
+    order = [body.index(f"  {sonde} |") for sonde in ("D23032096", "D23029639", "D23029434", "V3220905")]
+    assert order == sorted(order), body
 
 
 def test_build_new_sonde_message_announces_the_sonde():
@@ -143,17 +161,18 @@ def test_build_new_sonde_message_announces_the_sonde():
 
 
 def test_build_new_sonde_message_includes_overview_table():
-    overview: list[tuple[str, str | None, str | None]] = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC"),
-        ("D23032007", "Randersacker (DE)", "2026-11-17 16:58 UTC"),
+    overview: list[tuple[str, str | None, str | None, str]] = [
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
+        ("D23032007", "Randersacker (DE)", "2026-11-17 16:58 UTC", "33.9 km"),
     ]
     msg = build_new_sonde_message("D23032007", overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
     assert "Alle überwachten Sonden (2):" in body
-    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC" in body
+    assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km" in body
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23032007"' in html
     assert "Schönau (DE)" in html
+    assert "Entfernung vom QTH" in html
 
 
 def test_parse_nearest_city_english():
@@ -185,3 +204,22 @@ def test_format_landing_time():
 
 def test_format_landing_time_invalid():
     assert format_landing_time("not-a-date") == "not-a-date"
+
+
+def test_parse_tracker_distance():
+    text = "Liebe(r) Nick Horn (nicklmhf) Entfernung von Deinem QTH 4.05 km · 51° NE Nächste Stadt"
+    assert parse_tracker_distance(text) == "4.05 km · 51° NE"
+
+
+def test_parse_tracker_distance_without_bearing():
+    assert parse_tracker_distance("Entfernung von Deinem QTH 12,5 km") == "12.5 km"
+
+
+def test_parse_tracker_distance_missing():
+    assert parse_tracker_distance("Nächste Stadt Karbach (DE)") is None
+
+
+def test_tracker_body_text_strips_html():
+    message = EmailMessage()
+    message.set_content("<p>Entfernung von Deinem QTH 4.05 km · 51° NE</p>", subtype="html")
+    assert "4.05 km" in tracker_body_text(message)

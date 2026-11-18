@@ -97,9 +97,13 @@ stays silent when nothing changed.
 *   **Notification:** one e-mail per sonde to `radiosonde@hornick.de`, subject
     `[Radiosondy] <ID> Status Änderung: <STATUS>`, body contains the link, the sonde number and
     the new rows.
-*   **Overview:** every notification also lists all watched sondes with their nearest city and
-    predicted landing time, e.g. `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC`.
-    Sondes without data yet show `-`.
+*   **Overview:** every notification also lists all watched sondes with their nearest city,
+    predicted landing time and the distance from your QTH, e.g.
+    `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km · 51° NE`.
+    Sondes without data yet show `-`. The table is sorted youngest first (latest landing on top).
+*   **QTH distance:** taken from the tracker mail itself (`Entfernung von Deinem QTH 4.05 km ·
+    51° NE`), so it uses the QTH stored in your radiosondy.info account — nothing to configure.
+    The value is kept in the state file so it survives the mail being deleted.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to
     `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>` (the plain text part carries the
     same URLs).
@@ -109,7 +113,8 @@ stays silent when nothing changed.
     35 11 * * * /usr/bin/flock -n /tmp/radiosondy_status.lock /bin/bash -c 'cd /home/hermes/dev/radiosondy_landed_waypoints && .venv/bin/python check_status_changes.py' >> /home/hermes/.hermes/logs/radiosondy-status.log 2>&1
     ```
 
-*   **State:** `~/.hermes/logs/radiosondy_status_state.json` (already reported rows per sonde).
+*   **State:** `~/.hermes/logs/radiosondy_status_state.json` — already reported rows and the
+    QTH distance per sonde.
 *   **Mailbox access:** IMAP read-only; the app password lives in
     `~/.hermes/secrets/gmail_app_password` and is never written to the config or the repo.
 *   **Silent when nothing changes**; a run failure sends one ❌ to the Hermes News Group.
