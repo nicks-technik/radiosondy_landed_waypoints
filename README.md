@@ -79,9 +79,11 @@ Manual run (add `--dry-run` to skip running the GPX script):
 2. mails the sonde overview to `radiosonde@hornick.de`, subject `[Radiosondy] Neue Sonde <ID>`.
 
 A message is processed at most once (`Message-ID`, remembered in
-`~/.hermes/logs/radiosondy_mail_state.json`). A message whose GPX run fails is left unprocessed
-so the next hourly run retries it. If the GPX succeeds but the mail fails, a ❌ goes to the
-Hermes News Group.
+`~/.hermes/logs/radiosondy_mail_state.json`), and a sonde is processed at most once
+(`sondes` in the same file): if `nickl` and `nicklmhf` both get a mail for the same sonde,
+the GPX runs once and only one ZIP goes to Telegram. A message whose GPX run fails is left
+unprocessed so the next hourly run retries it. If the GPX succeeds but the mail fails, a ❌
+goes to the Hermes News Group. `--dry-run` changes nothing on disk.
 
 ## Daily Status-Change Watch (e-mail)
 
@@ -98,11 +100,14 @@ stays silent when nothing changed.
     `[Radiosondy] <ID> Status Änderung: <STATUS>`, body contains the link, the sonde number and
     the new rows.
 *   **Overview:** every notification also lists all watched sondes with their nearest city,
-    predicted landing time and the distance from your QTH, e.g.
-    `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km · 51° NE`.
+    predicted landing time, the distance from your QTH and the receiver of the tracker mail,
+    e.g. `D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km · 51° NE | nicklmhf`.
     Sondes without data yet show `-`. The table is sorted youngest first (latest landing on top).
 *   **QTH distance:** taken from the tracker mail itself (`Entfernung von Deinem QTH 4.05 km ·
     51° NE`), so it uses the QTH stored in your radiosondy.info account — nothing to configure.
+*   **Receiver:** the radiosondy.info account the tracker mail was sent to (`nickl` / `nicklmhf`,
+    from the mail's greeting). If both accounts get a mail for the same sonde, the sonde is
+    listed once with both receivers.
 *   **Watched set = the inbox:** the list contains exactly the sondes whose tracker mail is still
     in the inbox. Delete the mail and the sonde disappears from the table again.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to

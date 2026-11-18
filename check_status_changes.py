@@ -77,6 +77,10 @@ TRACKER_QTH_RE = re.compile(
     r"(?:\s*·\s*([0-9]+)°\s*([A-Z]{1,2}))?",
     re.IGNORECASE,
 )
+# "Liebe(r) Nick Horn (nicklmhf)" - the radiosondy.info account the mail went to.
+TRACKER_RECEIVER_RE = re.compile(
+    r"Liebe\(r\)\s+[^(]{0,80}\(([A-Za-z0-9_.\-]+)\)", re.IGNORECASE
+)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -127,8 +131,14 @@ def parse_tracker_distance(text: str) -> str | None:
     return f"{value} km"
 
 
+def parse_tracker_receiver(text: str) -> str | None:
+    """'Liebe(r) Nick Horn (nicklmhf)' -> 'nicklmhf'."""
+    match = TRACKER_RECEIVER_RE.search(text)
+    return match.group(1) if match else None
+
+
 def find_announced_mails(password: str) -> list[dict]:
-    """Every tracker mail in the inbox: sonde, message_id and QTH distance."""
+    """Every tracker mail in the inbox: sonde, message_id and the mail's details."""
     found: dict[str, dict] = {}
     try:
         with imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30) as imap:
@@ -151,10 +161,12 @@ def find_announced_mails(password: str) -> list[dict]:
                 sonde = sonde_from_subject(subject)
                 if not sonde or not message_id:
                     continue
+                text = tracker_body_text(message)
                 found[message_id] = {
                     "sonde": sonde,
                     "message_id": message_id,
-                    "distance": parse_tracker_distance(tracker_body_text(message)),
+                    "distance": parse_tracker_distance(text),
+                    "receiver": parse_tracker_receiver(text),
                 }
     except (imaplib.IMAP4.error, OSError) as exc:
         logger.error("Mailbox search failed: %s", exc)
@@ -162,21 +174,27 @@ def find_announced_mails(password: str) -> list[dict]:
     return list(found.values())
 
 
-def watched_sondes(password: str, state: dict) -> dict[str, str]:
-    """sonde -> QTH distance for every sonde we watch.
+def watched_sondes(password: str, state: dict) -> dict[str, dict]:
+    """Tracker mail details for every sonde we watch, keyed by sonde number.
 
     The watched set is exactly the tracker mails in the inbox: a sonde whose mail
-    has been deleted disappears from the list again.
+    has been deleted disappears from the list again. If two receivers got a mail
+    for the same sonde, it is listed once with both receivers.
     """
-    announced = {record["sonde"]: record for record in find_announced_mails(password)}
+    announced: dict[str, dict] = {}
+    for record in find_announced_mails(password):
+        entry = announced.setdefault(record["sonde"], {"distance": None, "receivers": []})
+        if record["distance"]:
+            entry["distance"] = record["distance"]
+        if record["receiver"] and record["receiver"] not in entry["receivers"]:
+            entry["receivers"].append(record["receiver"])
+
     state["sondes"] = {
         sonde: entry for sonde, entry in state["sondes"].items() if sonde in announced
     }
-    distances: dict[str, str] = {}
-    for sonde, record in announced.items():
+    for sonde in announced:
         state["sondes"].setdefault(sonde, {"rows": []})
-        distances[sonde] = record["distance"] or "-"
-    return distances
+    return announced
 
 
 def sonde_from_subject(subject: str) -> str | None:
@@ -261,8 +279,13 @@ def fetch_status_changes(sonde: str, session: requests.Session) -> list[list[str
 
 
 # --- Notification ------------------------------------------------------------
-# One row of the sonde overview: (sonde, nearest city, landing time, QTH distance).
-OverviewRow = tuple[str, str | None, str | None, str]
+# One row of the sonde overview:
+# (sonde, nearest city, landing time, QTH distance, receiver).
+OverviewRow = tuple[str, str | None, str | None, str, str]
+
+def format_receivers(receivers: list[str]) -> str:
+    """'nickl' / ['nickl', 'nicklmhf'] -> 'nickl' / 'nickl, nicklmhf'."""
+    return ", ".join(receivers) if receivers else "-"
 
 
 def _overview_section(overview: list[OverviewRow]) -> tuple[list[str], list[str]]:
@@ -274,14 +297,14 @@ def _overview_section(overview: list[OverviewRow]) -> tuple[list[str], list[str]
         '<table border="0" cellpadding="4" cellspacing="0">',
         (
             "<tr><th>Sonde</th><th>Nächste Stadt</th><th>Landung</th>"
-            "<th>Entfernung vom QTH</th></tr>"
+            "<th>Entfernung vom QTH</th><th>Empfänger</th></tr>"
         ),
     ]
-    for watched_sonde, city, landing, distance in ordered:
+    for watched_sonde, city, landing, distance, receiver in ordered:
         watched_url = SONDE_PAGE_URL.format(sonde=watched_sonde)
         lines.append(
             f"  {watched_sonde} | {city or '-'} | Landung: {landing or '-'}"
-            f" | {distance} | {watched_url}"
+            f" | {distance} | {receiver} | {watched_url}"
         )
         html_parts.append(
             "<tr>"
@@ -289,6 +312,7 @@ def _overview_section(overview: list[OverviewRow]) -> tuple[list[str], list[str]
             f"<td>{escape(city or '-')}</td>"
             f"<td>{escape(landing or '-')}</td>"
             f"<td>{escape(distance)}</td>"
+            f"<td>{escape(receiver)}</td>"
             "</tr>"
         )
     html_parts.append("</table>")
@@ -388,19 +412,21 @@ def send_new_sonde_notification(sonde: str, password: str) -> None:
     state = load_state()
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
-    distances = watched_sondes(password, state)
+    records = watched_sondes(password, state)
     overview: list[OverviewRow] = []
-    for watched in sorted(distances):
+    for watched in sorted(records):
         try:
             html = fetch_sonde_html(watched, session)
         except requests.exceptions.RequestException as exc:
             logger.warning("%s: fetch failed: %s", watched, exc)
             continue
+        record = records[watched]
         overview.append((
             watched,
             parse_nearest_city(html),
             fetch_landing_time(watched, session),
-            distances[watched],
+            record["distance"] or "-",
+            format_receivers(record["receivers"]),
         ))
     save_state(state)
     send_message(build_new_sonde_message(sonde, overview), password)
@@ -447,12 +473,12 @@ def main() -> int:
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
 
-    distances = watched_sondes(password, state)
+    records = watched_sondes(password, state)
     tracked_before = set(state["sondes"])
 
     notified = 0
-    details: dict[str, tuple[str | None, str | None, str]] = {}
-    for sonde in sorted(distances):
+    details: dict[str, tuple[str | None, str | None, str, str]] = {}
+    for sonde in sorted(records):
         try:
             html = fetch_sonde_html(sonde, session)
         except requests.exceptions.RequestException as exc:
@@ -461,7 +487,12 @@ def main() -> int:
 
         city = parse_nearest_city(html)
         landing = fetch_landing_time(sonde, session)
-        details[sonde] = (city, landing, distances[sonde])
+        details[sonde] = (
+            city,
+            landing,
+            records[sonde]["distance"] or "-",
+            format_receivers(records[sonde]["receivers"]),
+        )
         rows = parse_status_rows(html)
 
         known = [tuple(r) for r in state["sondes"][sonde].get("rows", [])]
@@ -477,14 +508,14 @@ def main() -> int:
         state["sondes"][sonde]["rows"] = rows
 
         overview = [
-            (watched, *details.get(watched, (None, None, "-")))
+            (watched, *details.get(watched, (None, None, "-", "-")))
             for watched in sorted(state["sondes"])
         ]
 
         if args.dry_run:
             summary = ", ".join(
-                f"{watched}={city or '-'}/{landing or '-'}/{distance}"
-                for watched, city, landing, distance in overview
+                f"{watched}={city or '-'}/{landing or '-'}/{distance}/{receiver}"
+                for watched, city, landing, distance, receiver in overview
             )
             logger.info("%s: %d new row(s) (dry run); %s", sonde, len(new_rows), summary)
             continue

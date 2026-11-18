@@ -1,6 +1,8 @@
 """Tests for the hourly tracker-mail handler."""
 
 import json
+import subprocess
+import sys
 from email.message import EmailMessage
 
 import check_tracker_mail as c
@@ -49,8 +51,48 @@ def test_sonde_number_from_url():
 def test_state_roundtrip(tmp_path, monkeypatch):
     state_file = tmp_path / "state.json"
     monkeypatch.setattr(c, "STATE_FILE", state_file)
-    assert c.load_state() == {"processed": []}
-    c.save_state({"processed": ["a", "b"]})
-    assert c.load_state() == {"processed": ["a", "b"]}
-    assert json.loads(state_file.read_text())["processed"] == ["a", "b"]
+    assert c.load_state() == {"processed": [], "sondes": []}
+    c.save_state({"processed": ["a", "b"], "sondes": ["D23029639"]})
+    assert c.load_state() == {"processed": ["a", "b"], "sondes": ["D23029639"]}
+    assert json.loads(state_file.read_text())["sondes"] == ["D23029639"]
     assert state_file.parent.exists()
+
+
+def test_main_processes_a_new_sonde(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(c, "STATE_FILE", state_file)
+    monkeypatch.setattr(c, "read_app_password", lambda: "pw")
+    monkeypatch.setattr(c, "tracker_messages", lambda pw: [("m1", make_message(EMAIL_HTML))])
+    monkeypatch.setattr(c, "run_gpx_script", lambda url: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(c, "send_new_sonde_notification", lambda sonde, pw: None)
+    monkeypatch.setattr(sys, "argv", ["check_tracker_mail.py"])
+
+    assert c.main() == 0
+    assert c.load_state()["sondes"] == ["D23029639"]
+
+
+def test_main_sends_only_once_per_sonde(tmp_path, monkeypatch):
+    """A second receiver's mail for the same sonde must not produce a second ZIP."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(c, "STATE_FILE", state_file)
+    monkeypatch.setattr(c, "read_app_password", lambda: "pw")
+    state_file.write_text(json.dumps({"processed": [], "sondes": ["D23029639"]}))
+    monkeypatch.setattr(c, "tracker_messages", lambda pw: [("m1", make_message(EMAIL_HTML))])
+    monkeypatch.setattr(c, "run_gpx_script", lambda url: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(c, "send_new_sonde_notification", lambda sonde, pw: None)
+    monkeypatch.setattr(sys, "argv", ["check_tracker_mail.py"])
+
+    assert c.main() == 0
+    assert c.load_state()["processed"] == ["m1"]
+    assert c.load_state()["sondes"] == ["D23029639"]
+
+
+def test_main_dry_run_does_not_change_state(tmp_path, monkeypatch):
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(c, "STATE_FILE", state_file)
+    monkeypatch.setattr(c, "read_app_password", lambda: "pw")
+    monkeypatch.setattr(c, "tracker_messages", lambda pw: [("m1", make_message(EMAIL_HTML))])
+    monkeypatch.setattr(sys, "argv", ["check_tracker_mail.py", "--dry-run"])
+
+    assert c.main() == 0
+    assert not state_file.exists()

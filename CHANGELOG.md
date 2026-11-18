@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sonde overview to `radiosonde@hornick.de` (`[Radiosondy] Neue Sonde <ID>`).
 - `check_status_changes.py`: daily watch of the "Status Changes" table on each tracked
   sonde's radiosondy.info archive page; new rows are mailed to `radiosonde@hornick.de`.
-  Every notification also lists all watched sondes with nearest city, predicted landing time
-  and the "Entfernung von Deinem QTH" taken from the tracker mail, sorted youngest first.
-  The watched set is exactly the tracker mails in the inbox — a deleted mail drops the sonde.
+  Every notification also lists all watched sondes with nearest city, predicted landing time,
+  the "Entfernung von Deinem QTH" and the receiver taken from the tracker mail, sorted
+  youngest first. The watched set is exactly the tracker mails in the inbox — a deleted mail
+  drops the sonde.
+- `check_tracker_mail.py` processes a sonde at most once: if `nickl` and `nicklmhf` both get a
+  mail for the same sonde, only one GPX run and one Telegram ZIP happen. `--dry-run` no longer
+  writes the state file.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its

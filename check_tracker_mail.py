@@ -61,7 +61,7 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("State file unreadable, starting fresh: %s", STATE_FILE)
-    return {"processed": []}
+    return {"processed": [], "sondes": []}
 
 
 def save_state(state: dict) -> None:
@@ -183,6 +183,7 @@ def main() -> int:
 
     state = load_state()
     processed = set(state.get("processed", []))
+    handled_sondes = set(state.get("sondes", []))
     password = read_app_password()
 
     ran = 0
@@ -197,12 +198,18 @@ def main() -> int:
             processed.add(message_id)
             continue
 
+        sonde = sonde_number(url)
+        if sonde and sonde in handled_sondes:
+            # A second receiver (nickl / nicklmhf) can get a mail for the same
+            # sonde - it is only processed and sent once.
+            logger.info("sonde %s already handled - skipping %s", sonde, message_id)
+            processed.add(message_id)
+            continue
+
         if args.dry_run:
             logger.info("would run %s for %s", GPX_SCRIPT.name, url)
-            sonde = sonde_number(url)
             if sonde:
                 logger.info("would mail the sonde overview for %s", sonde)
-            processed.add(message_id)
             ran += 1
             continue
 
@@ -225,11 +232,12 @@ def main() -> int:
             continue
 
         processed.add(message_id)
+        if sonde:
+            handled_sondes.add(sonde)
         ran += 1
         if not args.quiet:
             print(f"processed {url} -> GPX send OK")
 
-        sonde = sonde_number(url)
         if sonde:
             try:
                 send_new_sonde_notification(sonde, password)
@@ -240,8 +248,10 @@ def main() -> int:
                 if not args.quiet:
                     print(f"update mail sent for {sonde} -> {RECIPIENT}")
 
-    state["processed"] = sorted(processed)
-    save_state(state)
+    if not args.dry_run:
+        state["processed"] = sorted(processed)
+        state["sondes"] = sorted(handled_sondes)
+        save_state(state)
     logger.info("run finished, %d message(s) handled", ran)
     return 0
 

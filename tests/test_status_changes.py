@@ -6,9 +6,11 @@ from check_status_changes import (
     build_message,
     build_new_sonde_message,
     format_landing_time,
+    format_receivers,
     parse_nearest_city,
     parse_status_rows,
     parse_tracker_distance,
+    parse_tracker_receiver,
     sonde_from_subject,
     tracker_body_text,
     watched_sondes,
@@ -97,9 +99,9 @@ def test_build_message_contains_link_and_sonde():
 
 def test_build_message_lists_all_sondes():
     overview = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
-        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km"),
-        ("D23032007", None, None, "-"),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km", "nicklmhf"),
+        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km", "nickl"),
+        ("D23032007", None, None, "-", "-"),
     ]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
@@ -107,12 +109,12 @@ def test_build_message_lists_all_sondes():
     assert "D23029639 | Schönau (DE) | Landung: 2026-11-17 13:15 UTC | 34.3 km" in body
     assert "D23029434 | Babenhausen (DE) | Landung: 2026-11-17 11:47 UTC | 24.3 km" in body
     assert "D23032007 | - | Landung: - | -" in body
-    for watched, _, _, _ in overview:
+    for watched, _, _, _, _ in overview:
         assert f"https://radiosondy.info/sonde_archive.php?sondenumber={watched}" in body
 
 
 def test_build_message_links_open_all_page():
-    overview = [("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km")]
+    overview = [("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km", "nicklmhf")]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert '<a href="https://radiosondy.info/sonde_archive.php?sondenumber=D23029639">' in html
@@ -120,8 +122,8 @@ def test_build_message_links_open_all_page():
 
 def test_build_message_html_links_every_sonde():
     overview = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
-        ("D23032007", None, None, "-"),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km", "nicklmhf"),
+        ("D23032007", None, None, "-", "-"),
     ]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
@@ -132,7 +134,7 @@ def test_build_message_html_links_every_sonde():
 
 
 def test_build_message_html_escapes_city():
-    overview = [("D23029639", "<b>Schönau</b> (DE)", None, "-")]
+    overview = [("D23029639", "<b>Schönau</b> (DE)", None, "-", "nicklmhf")]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     html = msg.get_body(preferencelist=("html",)).get_content()
     assert "&lt;b&gt;Schönau&lt;/b&gt; (DE)" in html
@@ -140,10 +142,10 @@ def test_build_message_html_escapes_city():
 
 def test_overview_is_sorted_youngest_first():
     overview = [
-        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km"),
-        ("D23032096", "Kleinrinderfeld (DE)", "2026-11-17 18:27 UTC", "31.0 km"),
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
-        ("V3220905", "Aura im Sinngrund (DE)", None, "-"),
+        ("D23029434", "Babenhausen (DE)", "2026-11-17 11:47 UTC", "24.3 km", "nickl"),
+        ("D23032096", "Kleinrinderfeld (DE)", "2026-11-17 18:27 UTC", "31.0 km", "nicklmhf"),
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km", "nicklmhf"),
+        ("V3220905", "Aura im Sinngrund (DE)", None, "-", "-"),
     ]
     msg = build_message("D23029639", parse_status_rows(TABLE_HTML), overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
@@ -162,9 +164,9 @@ def test_build_new_sonde_message_announces_the_sonde():
 
 
 def test_build_new_sonde_message_includes_overview_table():
-    overview: list[tuple[str, str | None, str | None, str]] = [
-        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km"),
-        ("D23032007", "Randersacker (DE)", "2026-11-17 16:58 UTC", "33.9 km"),
+    overview: list[tuple[str, str | None, str | None, str, str]] = [
+        ("D23029639", "Schönau (DE)", "2026-11-17 13:15 UTC", "34.3 km", "nicklmhf"),
+        ("D23032007", "Randersacker (DE)", "2026-11-17 16:58 UTC", "33.9 km", "nickl"),
     ]
     msg = build_new_sonde_message("D23032007", overview)
     body = msg.get_body(preferencelist=("plain",)).get_content()
@@ -174,6 +176,7 @@ def test_build_new_sonde_message_includes_overview_table():
     assert 'href="https://radiosondy.info/sonde_archive.php?sondenumber=D23032007"' in html
     assert "Schönau (DE)" in html
     assert "Entfernung vom QTH" in html
+    assert "Empfänger" in html
 
 
 def test_parse_nearest_city_english():
@@ -226,14 +229,40 @@ def test_tracker_body_text_strips_html():
     assert "4.05 km" in tracker_body_text(message)
 
 
+def test_parse_tracker_receiver():
+    text = "Liebe(r) Nick Horn (nicklmhf) Es befindet sich eine Sonde in der Nähe Deines QTHs!"
+    assert parse_tracker_receiver(text) == "nicklmhf"
+
+
+def test_parse_tracker_receiver_other_account():
+    text = "Liebe(r) Nick Hornick (nickl) Es befindet sich eine Sonde"
+    assert parse_tracker_receiver(text) == "nickl"
+
+
+def test_parse_tracker_receiver_missing():
+    assert parse_tracker_receiver("Nächste Stadt Karbach (DE)") is None
+
+
+def test_format_receivers():
+    assert format_receivers([]) == "-"
+    assert format_receivers(["nickl"]) == "nickl"
+    assert format_receivers(["nickl", "nicklmhf"]) == "nickl, nicklmhf"
+
+
 def test_watched_sondes_drops_mail_that_left_the_inbox(monkeypatch):
     state = {"sondes": {"D23029639": {"rows": []}, "D23034927": {"rows": []}}}
+    record = {
+        "sonde": "D23034927",
+        "message_id": "m1",
+        "distance": "4.05 km",
+        "receiver": "nicklmhf",
+    }
     monkeypatch.setattr(
         "check_status_changes.find_announced_mails",
-        lambda password: [{"sonde": "D23034927", "message_id": "m1", "distance": "4.05 km"}],
+        lambda password: [record],
     )
-    distances = watched_sondes("pw", state)
-    assert distances == {"D23034927": "4.05 km"}
+    records = watched_sondes("pw", state)
+    assert list(records) == ["D23034927"]
     assert set(state["sondes"]) == {"D23034927"}
 
 
@@ -241,7 +270,26 @@ def test_watched_sondes_adds_new_mail(monkeypatch):
     state = {"sondes": {}}
     monkeypatch.setattr(
         "check_status_changes.find_announced_mails",
-        lambda password: [{"sonde": "D23034927", "message_id": "m1", "distance": None}],
+        lambda password: [
+            {"sonde": "D23034927", "message_id": "m1", "distance": None, "receiver": None}
+        ],
     )
-    assert watched_sondes("pw", state) == {"D23034927": "-"}
+    assert watched_sondes("pw", state) == {
+        "D23034927": {"distance": None, "receivers": []}
+    }
     assert state["sondes"]["D23034927"] == {"rows": []}
+
+
+def test_watched_sondes_merges_two_receivers_for_one_sonde(monkeypatch):
+    state = {"sondes": {}}
+    monkeypatch.setattr(
+        "check_status_changes.find_announced_mails",
+        lambda password: [
+            {"sonde": "D23034927", "message_id": "m1", "distance": "4.05 km", "receiver": "nicklmhf"},
+            {"sonde": "D23034927", "message_id": "m2", "distance": "4.05 km", "receiver": "nickl"},
+        ],
+    )
+    assert watched_sondes("pw", state) == {
+        "D23034927": {"distance": "4.05 km", "receivers": ["nicklmhf", "nickl"]}
+    }
+    assert state["sondes"] == {"D23034927": {"rows": []}}
