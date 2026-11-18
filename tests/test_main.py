@@ -18,7 +18,27 @@ from main import (
     Coordinates,
     SondeData,
     SondeProcessor,
+    zip_filename_for,
 )
+
+
+class TestZipFilename(unittest.TestCase):
+    """Tests for the Telegram ZIP file name"""
+
+    def test_drops_the_waypoint_marker(self):
+        self.assertEqual(
+            zip_filename_for("gpx/D23031923_261117_1110_Krombach_DE_gpx_waypoint.gpx"),
+            "gpx/D23031923_261117_1110_Krombach_DE.zip",
+        )
+
+    def test_without_city_and_marker(self):
+        self.assertEqual(
+            zip_filename_for("gpx/D23031923_261117_1110_gpx_waypoint.gpx"),
+            "gpx/D23031923_261117_1110.zip",
+        )
+
+    def test_marker_missing_still_zips(self):
+        self.assertEqual(zip_filename_for("gpx/D23031923.gpx"), "gpx/D23031923.zip")
 
 
 class TestCoordinates(unittest.TestCase):

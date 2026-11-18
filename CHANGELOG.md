@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes the state file.
 - Fixed the status baseline: rows a sonde already had when it was first picked up are now saved
   as the baseline, so the next run does not report them as changes.
+- The Telegram ZIP no longer carries the `_gpx_waypoint` marker:
+  `D23031923_261117_1110_Krombach_DE_gpx_waypoint.gpx` → `D23031923_261117_1110_Krombach_DE.zip`.
+  The GPX file itself (and the file inside the ZIP) keeps its name.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its

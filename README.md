@@ -8,7 +8,7 @@ This project provides a Python script to extract the last seen and predicted lan
 *   Parses the last seen and predicted landing coordinates, including course and altitude.
 *   Generates a GPX file with waypoints for both coordinates.
 *   Adds the nearest city (e.g. `Rechtenbach (DE)`, without the distance) to every waypoint name and description.
-*   The GPX file is named with the sonde number, the last seen time and the nearest city (e.g. `D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`).
+*   The GPX file is named with the sonde number, the last seen time and the nearest city (e.g. `D23031952_261112_1109_Rechtenbach_DE_gpx_waypoint.gpx`). The ZIP sent to Telegram carries the same name without the `_gpx_waypoint` marker (e.g. `D23031952_261112_1109_Rechtenbach_DE.zip`); the GPX inside the ZIP keeps its own name.
 *   Automatically sends the generated GPX file to a Telegram chat.
 
 ## Usage

@@ -60,6 +60,13 @@ class SondeData:
     climb_rate: float
 
 
+def zip_filename_for(gpx_path: str) -> str:
+    """ZIP name for a GPX file: same name, without the ``_gpx_waypoint`` marker."""
+    name = os.path.basename(gpx_path)
+    stem = name.removesuffix("_gpx_waypoint.gpx").removesuffix(".gpx")
+    return os.path.join(os.path.dirname(gpx_path), f"{stem}.zip")
+
+
 class SondeProcessor:
     def __init__(self, url: str):
         self.url = url
@@ -553,7 +560,7 @@ class SondeProcessor:
             logger.warning("Telegram bot token or chat ID not found in .env file.")
             return False
 
-        zip_filename = file_path.replace(".gpx", ".zip")
+        zip_filename = zip_filename_for(file_path)
         try:
             bot = telegram.Bot(token=bot_token)
             with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zf:
