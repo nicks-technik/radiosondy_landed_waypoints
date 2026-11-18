@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `check_tracker_mail.py` processes a sonde at most once: if `nickl` and `nicklmhf` both get a
   mail for the same sonde, only one GPX run and one Telegram ZIP happen. `--dry-run` no longer
   writes the state file.
+- Fixed the status baseline: rows a sonde already had when it was first picked up are now saved
+  as the baseline, so the next run does not report them as changes.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its

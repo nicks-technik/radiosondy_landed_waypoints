@@ -473,8 +473,8 @@ def main() -> int:
     session = requests.Session()
     session.headers.update(HTTP_HEADERS)
 
-    records = watched_sondes(password, state)
     tracked_before = set(state["sondes"])
+    records = watched_sondes(password, state)
 
     notified = 0
     details: dict[str, tuple[str | None, str | None, str, str]] = {}
@@ -499,13 +499,12 @@ def main() -> int:
         new_rows = [r for r in rows if tuple(r) not in known]
         if sonde not in tracked_before:
             # Rows that already existed when the sonde was first picked up are the
-            # baseline, not an update.
+            # baseline, not an update - but they still have to be remembered.
             new_rows = []
+        state["sondes"][sonde]["rows"] = rows
 
         if not new_rows:
             continue
-
-        state["sondes"][sonde]["rows"] = rows
 
         overview = [
             (watched, *details.get(watched, (None, None, "-", "-")))

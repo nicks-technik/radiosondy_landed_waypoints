@@ -1,5 +1,7 @@
 """Tests for the daily Status Changes watcher."""
 
+import json
+import sys
 from email.message import EmailMessage
 
 from check_status_changes import (
@@ -7,6 +9,7 @@ from check_status_changes import (
     build_new_sonde_message,
     format_landing_time,
     format_receivers,
+    main,
     parse_nearest_city,
     parse_status_rows,
     parse_tracker_distance,
@@ -227,6 +230,33 @@ def test_tracker_body_text_strips_html():
     message = EmailMessage()
     message.set_content("<p>Entfernung von Deinem QTH 4.05 km · 51° NE</p>", subtype="html")
     assert "4.05 km" in tracker_body_text(message)
+
+
+def test_first_pickup_rows_are_saved_as_baseline(tmp_path, monkeypatch):
+    """A sonde first seen with rows already present must not report them later."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr("check_status_changes.STATE_FILE", state_file)
+    monkeypatch.setattr("check_status_changes.read_app_password", lambda: "pw")
+    monkeypatch.setattr(
+        "check_status_changes.watched_sondes",
+        lambda pw, state: state["sondes"].update(
+            {"D23034927": {"rows": []}}
+        ) or {"D23034927": {"distance": None, "receivers": []}},
+    )
+    monkeypatch.setattr("check_status_changes.fetch_sonde_html", lambda sonde, session: "<html></html>")
+    monkeypatch.setattr("check_status_changes.fetch_landing_time", lambda sonde, session: None)
+    monkeypatch.setattr(
+        "check_status_changes.parse_status_rows", lambda html: [["Idar-Oberstein (DE)", "DFM"]]
+    )
+    monkeypatch.setattr("check_status_changes.send_message", lambda msg, pw: None)
+    monkeypatch.setattr(sys, "argv", ["check_status_changes.py"])
+
+    assert main() == 0
+    state = json.loads(state_file.read_text())
+    assert state["sondes"]["D23034927"]["rows"] == [["Idar-Oberstein (DE)", "DFM"]]
+
+    # second run: the stored rows are the baseline, so nothing is reported
+    assert main() == 0
 
 
 def test_parse_tracker_receiver():
