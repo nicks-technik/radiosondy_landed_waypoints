@@ -76,7 +76,8 @@ Manual run (add `--dry-run` to skip running the GPX script):
 `tracker@radiosondy.info` mail is in the inbox it
 
 1. runs `main.py` with the link from the mail's "Details" button → GPX + Telegram ZIP, and
-2. mails the sonde overview to `radiosonde@hornick.de`, subject `[Radiosondy] Neue Sonde <ID>`.
+2. mails the sonde overview to `radiosonde@hornick.de`, subject `[Radiosondy] Neue Sonde <ID>`,
+   with the same `radiosondy_waypoints_<date>.zip` attachment (all watched sondes, one merged GPX).
 
 A message is processed at most once (`Message-ID`, remembered in
 `~/.hermes/logs/radiosondy_mail_state.json`), and a sonde is processed at most once
@@ -113,6 +114,12 @@ stays silent when nothing changed.
 *   **Links:** the mail is sent as plain text + HTML; in the HTML part the sonde number links to
     `https://radiosondy.info/sonde_archive.php?sondenumber=<ID>` (the plain text part carries the
     same URLs).
+*   **Waypoint ZIP:** every notification carries `radiosondy_waypoints_<date>.zip` with a single
+    merged GPX inside (`radiosondy_waypoints_<date>.gpx`) holding the waypoints of **all** watched
+    sondes — last seen, predicted landing and radiosondy landing point — so one import covers
+    everything. The newest GPX per sonde is used, taken from `gpx/` (configurable via
+    `RADIOSONDY_GPX_DIR`). Sondes without a GPX file are simply missing from the merge; if no
+    watched sonde has one, the mail goes out without an attachment.
 *   **Schedule:** daily at 11:35 (Europe/Berlin) from the system crontab, `flock`-guarded:
 
     ```cron

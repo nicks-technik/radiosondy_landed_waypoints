@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import email
 import imaplib
+import io
 import json
 import logging
 import os
@@ -27,11 +28,13 @@ import re
 import smtplib
 import sys
 import time
+import zipfile
 from datetime import datetime
 from email import policy
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
+from xml.etree import ElementTree as ET
 from xml.sax.saxutils import escape
 
 import requests
@@ -51,6 +54,7 @@ STATE_FILE = Path(
     os.environ.get("RADIOSONDY_STATE_FILE", "/home/hermes/.hermes/logs/radiosondy_status_state.json")
 )
 ENV_FILE = Path("/home/hermes/.hermes/.env")
+GPX_DIR = Path(os.environ.get("RADIOSONDY_GPX_DIR", "gpx"))
 
 HTTP_HEADERS = {
     "User-Agent": (
@@ -319,7 +323,66 @@ def _overview_section(overview: list[OverviewRow]) -> tuple[list[str], list[str]
     return lines, html_parts
 
 
-def _finish_message(subject: str, lines: list[str], html_parts: list[str]) -> EmailMessage:
+def newest_gpx_per_sonde(sondes: list[str]) -> list[Path]:
+    """The newest GPX file per sonde, keeping the order of ``sondes``."""
+    try:
+        candidates = list(GPX_DIR.glob("*_gpx_waypoint.gpx"))
+    except OSError as exc:
+        logger.warning("cannot list %s: %s", GPX_DIR, exc)
+        return []
+    newest: dict[str, Path] = {}
+    for path in candidates:
+        sonde = path.name.split("_", 1)[0]
+        if sonde not in sondes:
+            continue
+        previous = newest.get(sonde)
+        if previous is None or path.stat().st_mtime > previous.stat().st_mtime:
+            newest[sonde] = path
+    return [newest[sonde] for sonde in sondes if sonde in newest]
+
+
+def merge_gpx(paths: list[Path]) -> str | None:
+    """Merge the waypoints of several GPX files into one GPX document."""
+    waypoints = []
+    for path in paths:
+        try:
+            root = ET.fromstring(path.read_text(encoding="utf-8"))
+        except (ET.ParseError, OSError) as exc:
+            logger.warning("%s: cannot read GPX: %s", path, exc)
+            continue
+        waypoints.extend(
+            ET.tostring(wpt, encoding="unicode").strip() for wpt in root.findall("wpt")
+        )
+    if not waypoints:
+        return None
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<gpx version="1.1" creator="radiosondy-status">\n'
+        + "\n".join(waypoints)
+        + "\n</gpx>\n"
+    )
+
+
+def waypoints_attachment(overview: list[OverviewRow] | None) -> tuple[str, bytes] | None:
+    """ZIP holding one merged GPX with every watched sonde's waypoints."""
+    if not overview:
+        return None
+    xml = merge_gpx(newest_gpx_per_sonde([row[0] for row in overview]))
+    if not xml:
+        return None
+    gpx_name = f"radiosondy_waypoints_{datetime.now():%Y-%m-%d}.gpx"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(gpx_name, xml)
+    return gpx_name.removesuffix(".gpx") + ".zip", buffer.getvalue()
+
+
+def _finish_message(
+    subject: str,
+    lines: list[str],
+    html_parts: list[str],
+    attachment: tuple[str, bytes] | None = None,
+) -> EmailMessage:
     lines += [
         "",
         "Details bitte auf der obigen Seite prüfen.",
@@ -337,6 +400,9 @@ def _finish_message(subject: str, lines: list[str], html_parts: list[str]) -> Em
     msg["Message-ID"] = make_msgid(domain="gmail.com")
     msg.set_content("\n".join(lines), charset="utf-8")
     msg.add_alternative("".join(html_parts), subtype="html")
+    if attachment:
+        name, data = attachment
+        msg.add_attachment(data, maintype="application", subtype="zip", filename=name)
     return msg
 
 
@@ -375,7 +441,13 @@ def build_message(
         lines += overview_lines
         html_parts += overview_html
 
-    return _finish_message(subject, lines, html_parts)
+    attachment = waypoints_attachment(overview)
+    if attachment:
+        logger.info("attaching %s (%d watched sonde(s))", attachment[0], len(overview or []))
+    else:
+        logger.info("no GPX files for the watched sondes - mail goes without attachment")
+
+    return _finish_message(subject, lines, html_parts, attachment)
 
 
 def build_new_sonde_message(
@@ -394,7 +466,12 @@ def build_new_sonde_message(
         overview_lines, overview_html = _overview_section(overview)
         lines += overview_lines
         html_parts += overview_html
-    return _finish_message(subject, lines, html_parts)
+
+    attachment = waypoints_attachment(overview)
+    if attachment:
+        logger.info("attaching %s (%d watched sonde(s))", attachment[0], len(overview or []))
+
+    return _finish_message(subject, lines, html_parts, attachment)
 
 
 def send_message(msg: EmailMessage, password: str) -> None:

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Telegram ZIP no longer carries the `_gpx_waypoint` marker:
   `D23031923_261117_1110_Krombach_DE_gpx_waypoint.gpx` → `D23031923_261117_1110_Krombach_DE.zip`.
   The GPX file itself (and the file inside the ZIP) keeps its name.
+- Every notification mail now carries `radiosondy_waypoints_<date>.zip` with one merged GPX
+  holding the waypoints of all watched sondes, so a single import covers everything.
 - The sonde archive page is fetched with a short retry so a transient failure does not
   silently produce an empty status list.
 - The notification is now plain text + HTML, and every sonde in the list links to its

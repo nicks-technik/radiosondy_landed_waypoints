@@ -1,15 +1,24 @@
 """Tests for the daily Status Changes watcher."""
 
+import io
 import json
+import os
 import sys
+import time
+import zipfile
 from email.message import EmailMessage
+from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from check_status_changes import (
+    OverviewRow,
     build_message,
     build_new_sonde_message,
     format_landing_time,
     format_receivers,
     main,
+    merge_gpx,
+    newest_gpx_per_sonde,
     parse_nearest_city,
     parse_status_rows,
     parse_tracker_distance,
@@ -17,6 +26,7 @@ from check_status_changes import (
     sonde_from_subject,
     tracker_body_text,
     watched_sondes,
+    waypoints_attachment,
 )
 
 TABLE_HTML = """
@@ -323,3 +333,100 @@ def test_watched_sondes_merges_two_receivers_for_one_sonde(monkeypatch):
         "D23034927": {"distance": "4.05 km", "receivers": ["nicklmhf", "nickl"]}
     }
     assert state["sondes"] == {"D23034927": {"rows": []}}
+
+
+GPX_TEMPLATE = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<gpx version="1.1" creator="gpx.py">\n'
+    '  <wpt lat="{lat}" lon="{lon}">\n'
+    "    <name>{sonde} Last Seen</name>\n"
+    "  </wpt>\n"
+    '  <wpt lat="{lat}" lon="{lon}">\n'
+    "    <name>{sonde} My Predicted Landing</name>\n"
+    "  </wpt>\n"
+    "</gpx>\n"
+)
+
+
+def write_gpx(
+    directory: Path, sonde: str, lat: str, lon: str, age_s: int = 0, index: int = 0
+) -> Path:
+    path = directory / f"{sonde}_261118_12{index:02d}_Ort_DE_gpx_waypoint.gpx"
+    path.write_text(GPX_TEMPLATE.format(lat=lat, lon=lon, sonde=sonde), encoding="utf-8")
+    stamp = time.time() - age_s
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_newest_gpx_per_sonde(tmp_path, monkeypatch):
+    monkeypatch.setattr("check_status_changes.GPX_DIR", tmp_path)
+    write_gpx(tmp_path, "D23034927", "50.0", "9.0", age_s=90, index=0)
+    new = write_gpx(tmp_path, "D23034927", "50.1", "9.1", age_s=10, index=1)
+    write_gpx(tmp_path, "D23034927", "50.2", "9.2", age_s=50, index=2)
+    other = write_gpx(tmp_path, "D23029639", "51.0", "10.0", index=0)
+
+    # the newest file per sonde, in the order of the requested sondes
+    assert newest_gpx_per_sonde(["D23029639", "D23034927", "D99999999"]) == [other, new]
+
+
+def test_merge_gpx_combines_all_waypoints(tmp_path):
+    first = write_gpx(tmp_path, "D23034927", "50.0", "9.0")
+    second = write_gpx(tmp_path, "D23029639", "51.0", "10.0")
+
+    merged = merge_gpx([first, second])
+
+    assert merged is not None
+    root = ET.fromstring(merged)
+    names = [wpt.findtext("name") for wpt in root.findall("wpt")]
+    assert names == [
+        "D23034927 Last Seen",
+        "D23034927 My Predicted Landing",
+        "D23029639 Last Seen",
+        "D23029639 My Predicted Landing",
+    ]
+
+
+def test_merge_gpx_without_waypoints(tmp_path):
+    empty = tmp_path / "empty.gpx"
+    empty.write_text('<?xml version="1.0"?><gpx version="1.1"></gpx>', encoding="utf-8")
+    assert merge_gpx([empty]) is None
+    assert merge_gpx([]) is None
+
+
+def test_waypoints_attachment_is_a_zip_with_one_gpx(tmp_path, monkeypatch):
+    monkeypatch.setattr("check_status_changes.GPX_DIR", tmp_path)
+    write_gpx(tmp_path, "D23034927", "50.0", "9.0")
+    overview: list[OverviewRow] = [
+        ("D23034927", "Karbach (DE)", "2026-11-18 12:00 UTC", "4.05 km", "nicklmhf")
+    ]
+
+    attachment = waypoints_attachment(overview)
+
+    assert attachment is not None
+    name, data = attachment
+    assert name.startswith("radiosondy_waypoints_") and name.endswith(".zip")
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert len(zf.namelist()) == 1
+        assert zf.namelist()[0].endswith(".gpx")
+        root = ET.fromstring(zf.read(zf.namelist()[0]).decode("utf-8"))
+    assert len(root.findall("wpt")) == 2
+
+
+def test_waypoints_attachment_without_gpx_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("check_status_changes.GPX_DIR", tmp_path)
+    assert waypoints_attachment([("D23034927", None, None, "-", "-")]) is None
+    assert waypoints_attachment(None) is None
+
+
+def test_build_message_carries_the_zip(tmp_path, monkeypatch):
+    monkeypatch.setattr("check_status_changes.GPX_DIR", tmp_path)
+    write_gpx(tmp_path, "D23034927", "50.0", "9.0")
+    overview: list[OverviewRow] = [
+        ("D23034927", "Karbach (DE)", "2026-11-18 12:00 UTC", "4.05 km", "nicklmhf")
+    ]
+
+    msg = build_message("D23034927", [["a", "b", "c", "d", "FOUND"]], overview)
+
+    attachments = [part for part in msg.walk() if part.get_filename()]
+    assert len(attachments) == 1
+    assert attachments[0].get_content_type() == "application/zip"
